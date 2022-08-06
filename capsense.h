@@ -7,11 +7,9 @@
 extern "C" {
 #endif
 
-#ifndef _IN_CAPSENSE_PROC_C
-#endif // /_IN_CAPSENSE_PROC_C
-
 #define CP_DTYPE float
-#define BST_OPEN            1  // button states
+#define BST_UNKNOWN         0  // button states
+#define BST_OPEN            1
 #define BST_OPEN_DEBOUNCE   2
 #define BST_CLOSED          3
 #define BST_CLOSED_DEBOUNCE 4
@@ -21,6 +19,7 @@ extern "C" {
 // 71690 310 347.41 358.42 360.59 361.75 362.74
 #define CP_LINEBUFSIZE 1000
 #define CP_COLCNT 9
+#define CP_COL_DATASTART 1   // don't want to normalize/scale off the growing ms column
 #define COL_MS_I       0
 #define COL_RAW_I      1
 #define COL_VDIV4_I    2
@@ -36,7 +35,9 @@ struct capsense_st {
 	struct ringbuffer_st rb_real;
 	struct ringbuffer_st *rb;
 	CP_DTYPE mn, mx;
+	float rmin, rmax; // recent min and max (from buffered)
 	char init;
+	int bst;
 };
 typedef struct capsense_st cp_st;
 
@@ -44,6 +45,13 @@ void ringbuffer_minmax(cp_st *cp, RB_DTYPE mn, RB_DTYPE mx);
 void capsense_init(cp_st *cp);
 void capsense_proc(cp_st *cp);
 void capsense_procstr(cp_st *cp, char *buf);
+
+#ifndef _IN_CAPSENSE_PROC_C
+	extern char colchars[CP_COLCNT];
+	extern char *colnames[CP_COLCNT];
+	extern char *colfgs[CP_COLCNT];
+#endif // /_IN_CAPSENSE_PROC_C
+
 
 #ifdef __cplusplus
 }
