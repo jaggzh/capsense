@@ -13,9 +13,25 @@
 #include <ringbuffer/ringbuffer.h>
 #include "termsize.h"
 
+/* #define GRAPH_CLUSTER_LINES 16 */
+#define GRAPH_CLUSTER_LINES 1
+#define DBBREAK { *((char *)0) = 0; } // segfault gdb
+#define RINGBUFFER_MINMAX_LOOKBEHIND_COUNT  20
+#define COLORCODE_BUFS 5
+#define ITOA_HELPER(x) #x
+#define ITOA(x) ITOA_HELPER(x)
+#define RGB_FG(r,g,b) "\033[38;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
+#define RGB_BG(r,g,b) "\033[48;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
+
+#define CPT_DEBUG_PAT 2
+#undef CPT_DEBUG_PAT
+
 cp_st cp_real;
 cp_st *cp = &cp_real;
 int tw, th;
+rb_st rb_raw_real;
+rb_st *rb_raw;
+float rb_raw_min, rb_raw_max;
 
 /*
 def mark_pressrange(st, en, d=None, plot=None):
@@ -74,15 +90,31 @@ int isfile(char *fn) {
 }
 
 int scaletx(float v, float rmin, float rmax) {
-	return ((v-rmin) / (rmax-rmin)) * (tw-1);
+	return (((v-rmin) / (rmax-rmin)) * (tw-1)) + 1;
 }
 
-void print_rgb_bg(int r, int g, int b) {
-	printf("\033[48;2;%d;%d;%dm", r, g, b);
+char *rgb_str_fg(int r, int g, int b) {
+	static int i=0;
+	static char buf[COLORCODE_BUFS][20];
+	if (r>255 || g>255 || b>255) return "";
+	sprintf(buf[i], "\033[38;2;%d;%d;%dm", r, g, b);
+	if (++i >= COLORCODE_BUFS) i=0;
+	return buf[i];
+}
+char *rgb_str_bg(int r, int g, int b) {
+	static int i=0;
+	static char buf[COLORCODE_BUFS][20];
+	if (r>255 || g>255 || b>255) return "";
+	sprintf(buf[i], "\033[48;2;%d;%d;%dm", r, g, b);
+	if (++i >= COLORCODE_BUFS) i=0;
+	return buf[i];
 }
 
 void print_rgb_fg(int r, int g, int b) {
 	printf("\033[38;2;%d;%d;%dm", r, g, b);
+}
+void print_rgb_bg(int r, int g, int b) {
+	printf("\033[48;2;%d;%d;%dm", r, g, b);
 }
 
 void prow(cp_st *cp, char *row, char **rowfgs) {
@@ -90,22 +122,25 @@ void prow(cp_st *cp, char *row, char **rowfgs) {
 	if (cp->bst == BST_OPEN_DEBOUNCE) {
 		print_rgb_bg(0,0,90);
 	} else if (cp->bst == BST_OPEN) {
-		print_rgb_bg(0,0,250);
+		print_rgb_bg(0,0,50);
 	} else if (cp->bst == BST_CLOSED_DEBOUNCE) {
 		print_rgb_bg(0,90,0);
 	} else if (cp->bst == BST_CLOSED) {
-		print_rgb_bg(0,255,0);
+		print_rgb_bg(0,155,0);
 	} else {
-		printf("\033[41m[%d] ", cp->bst);
+		printf("%s[%d] ", rgb_str_bg(127,0,127), cp->bst);
 	}
 	for (int i=0; i<255; i++) {
 		if (!row[i]) break;
+		#ifdef CPT_DEBUG_PAT
+			if (row[i] != 32) printf("Row[%d] %c\n", i, row[i]);
+		#endif
 		if (!rowfgs[i]) {
 			putc(row[i], stdout);
 		} else if (!prior_rowfg) {
-			printf("\033[%sm%c", rowfgs[i], row[i]);
+			printf("%s%c", rowfgs[i], row[i]);
 		} else if (strcmp(rowfgs[i], prior_rowfg)) {
-			printf("\033[%sm%c", rowfgs[i], row[i]);
+			printf("%s%c", rowfgs[i], row[i]);
 			prior_rowfg = rowfgs[i];
 		} else {
 			putc(row[i], stdout);
@@ -119,55 +154,96 @@ void pat(cp_st *cp, int sx, float v, char ch, char *attr, char send, char clear)
 	// if clear is true, resets buffer and leaves (no printing)
 	static char row[255];
 	static char *rowfgs[255];
-	static int cmax=0;
+	static int zeroi=0;
+	sx-=1;  // switch to 0 offset
 	if (clear) {
-		cmax=0;
+		zeroi=0;
 		memset(rowfgs, 0, sizeof(char *) * 255);
+		memset(row, 0, sizeof(row));
 	} else if (send) {
 		prow(cp, row, rowfgs);
 	} else {
-		/* printf("Sx: %d\n", sx); */
-		if (sx > cmax) {
-			for (int i=cmax; i<sx-1; i++) row[i]=' ';
-			row[sx-1] = ch;
-			rowfgs[sx-1] = attr;
-			row[sx] = 0;
+		#ifdef CPT_DEBUG_PAT
+			printf("PAT %c at sx=%d\n", ch, sx);
+		#endif
+		if (sx<0 || sx>=tw) return;
+		if (sx >= zeroi) {
+			for (int i=zeroi; i<sx; i++) row[i]=' ';
+			row[sx] = ch;
+			rowfgs[sx] = attr;
+			row[sx+1] = 0;
+			zeroi = sx+1;
 		} else {
-			row[sx-1] = ch;
+			row[sx] = ch;
+			rowfgs[sx] = attr;
 		}
-		cmax = sx;
+		#ifdef CPT_DEBUG_PAT
+			printf("Cmax: %d\n", zeroi);
+		#endif
 		/* printf("\033[%dCV\r", x); */
 	}
+}
+
+void cptest_ringbuffer_set_minmax(float *minp, float *maxp, rb_st *rb) {
+	float lmn=(float)INT_MAX;
+	float lmx=(float)INT_MIN;
+	RB_DTYPE v;
+	for (int i=0; i<rb->sz; i++) {
+		v = rb->d[i];
+		if (lmn > v) lmn = v;
+		if (lmx < v) lmx = v;
+	}
+	*minp = lmn-1;
+	*maxp = lmx+1;
 }
 
 void pcols(cp_st *cp) {
 	static unsigned long idx=0;
 	static char init=0;
 	/* static int pcols[CP_COLCNT]; */
-	static int ccols[CP_COLCNT];
+	static int sxvals[CP_COLCNT];
 	float v;
 	int sx;
 	/* int px; */
-	float rmin = cp->rmin;
-	float rmax = cp->rmax;
+	/* float rmin = cp->rmin; */
+	/* float rmax = cp->rmax; */
+
+	if (!init) {
+		/* for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) pcols[i] = sxvals[i]; */
+		init = 1;
+		ringbuffer_setall(rb_raw, cp->cols[CP_COL_DATASTART]);
+	}
+	//for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++)
+	for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++)
+		ringbuffer_add(rb_raw, cp->cols[i]);
+	ringbuffer_add(rb_raw, cp->mn);
+	ringbuffer_add(rb_raw, cp->mx);
+	/* ringbuffer_print(rb_raw); */
+	cptest_ringbuffer_set_minmax(&rb_raw_min, &rb_raw_max, rb_raw);
+	#ifdef CPT_DEBUG_PAT
+		printf("cp->mn = %f, cp->mx = %f\n", cp->mn, cp->mx);
+	#endif
 
 	for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
 		v = cp->cols[i];
-		sx = scaletx(v, rmin, rmax);
-		ccols[i] = sx;
+		sx = scaletx(v, rb_raw_min, rb_raw_max);
+		sxvals[i] = sx;
+		#ifdef CPT_DEBUG_PAT
+			printf("[%d] Min: %f, Max: %f, Val: %f, SX: %d, Ch:%c\n",
+				i, rb_raw_min, rb_raw_max, v, sx, !colchars[i] ? '_' : colchars[i]);
+		#endif
 	}
-	if (!init) {
-		/* for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) pcols[i] = ccols[i]; */
-		init = 1;
-	}
-	if (!(idx%16)) {
+	if (GRAPH_CLUSTER_LINES == 1 || !(idx%GRAPH_CLUSTER_LINES)) {
 		pat(cp, 0,0,0,0,0,1); // clear
 	}
-	pat(cp, scaletx(rmin, rmin, rmax)+1, rmin, '{', "33;1", 0, 0);
-	for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
+	//for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
+	//
+	pat(cp, scaletx(cp->mn, rb_raw_min, rb_raw_max)-1, cp->mn, '{', RGB_FG(250,0,0), 0, 0);
+	pat(cp, scaletx(cp->mx, rb_raw_min, rb_raw_max)+1, cp->mx, '}', RGB_FG(0,250,0), 0, 0);
+	for (int i=0; i<CP_COLCNT; i++) {
 		char colchar = colchars[i];
 		if (colchar) {
-			sx = ccols[i];
+			sx = sxvals[i];
 			/* px = pcols[i]; */
 			pat(cp, sx, v, colchar, colfgs[i], 0, 0);
 			/* if (sx >= px) { */
@@ -177,8 +253,12 @@ void pcols(cp_st *cp) {
 			/* } */
 		}
 	}
-	pat(cp, scaletx(rmax, rmin, rmax), rmax, '}', "33;1", 0, 0);
-	if ((idx%16) == 15) pat(cp, 0,0,0,0,1,0); // send
+	/* if ((idx%16) == 15) pat(cp, 0,0,0,0,1,0); // send */
+	if (GRAPH_CLUSTER_LINES == 1 ||
+		((idx%GRAPH_CLUSTER_LINES) == GRAPH_CLUSTER_LINES-1)) {
+			pat(cp, 0,0,0,0,1,0); // send
+	}
+
 	/* for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) pcols[i] = cp->cols[i]; */
 	idx++;
 	/* printf("\n"); */
@@ -187,6 +267,8 @@ void pcols(cp_st *cp) {
 int main(int argc, char *argv[]) {
 	char *logfn;
 	char buf[CP_LINEBUFSIZE+1];
+	rb_raw = &rb_raw_real;
+	ringbuffer_init(rb_raw, RINGBUFFER_MINMAX_LOOKBEHIND_COUNT * CP_COLCNT);
 	setbuf(stdout, 0);
 	get_termsize(&tw, &th);
 	if (argc>0) {
@@ -204,6 +286,7 @@ int main(int argc, char *argv[]) {
 	capsense_init(cp);
 	while (fgets(buf, CP_LINEBUFSIZE, f)) {
 		capsense_procstr(cp, buf);
+		printf("\033[41;1mSTATE: bst=%d\033[0m", cp->bst);
 		pcols(cp);
 	}
 }

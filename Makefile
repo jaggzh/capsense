@@ -29,7 +29,10 @@ unfulfilled:
 
 vi:
 	vim Makefile \
-		tests/capsense-test.c capsense.c capsense.h \
+		tests/capsense-test.c \
+		capsense.c \
+		sense-presses.py \
+		capsense.h \
 		../ringbuffer/ringbuffer.c \
 		../ringbuffer/ringbuffer.h \
 		tests/millis.c \
