@@ -32,6 +32,8 @@ vi:
 		tests/capsense-test.c \
 		capsense.c \
 		sense-presses.py \
+		tests/bansi.c \
+		tests/bansi.h \
 		capsense.h \
 		../ringbuffer/ringbuffer.c \
 		../ringbuffer/ringbuffer.h \

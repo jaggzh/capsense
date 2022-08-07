@@ -9,7 +9,10 @@
 
 #ifndef ARDUINO
 #include "tests/millis.h"
+#include "tests/bansi.h"
 #endif
+
+#define pf printf
 
 /* Handle capacitive sensor samples */
 // 164 samples/sec currently
@@ -51,18 +54,18 @@ char *colfgs[CP_COLCNT] = {
 int lookbehind=8;
 
 void capsense_init(cp_st *cp) {
-	cp->rb = &cp->rb_real;
-	ringbuffer_init(cp->rb, lookbehind);
-	ringbuffer_setall(cp->rb, 0);
+	cp->rb_range = &cp->rb_range_real;
+	ringbuffer_init(cp->rb_range, lookbehind);
+	ringbuffer_setall(cp->rb_range, 0);
 	grip_eval_delay_samples = (int)(sps * grip_eval_checkpoint_ms * .001);
 	if (!cmillis) cmillis = millis(); // Only do this once even with multiple caps!
-	cp->rmin = INT_MAX;
-	cp->rmax = -((float)INT_MAX);
+	cp->smoothmin = INT_MAX;
+	cp->smoothmax = -((float)INT_MAX);
 	cp->bst = BST_OPEN;
 }
 
 void cp_ringbuffer_set_minmax(cp_st *cp) {
-	rb_st *rb = cp->rb;
+	rb_st *rb = cp->rb_range;
 	float lmn=(float)INT_MAX;
 	float lmx=(float)INT_MIN;
 	CP_DTYPE v;
@@ -71,22 +74,22 @@ void cp_ringbuffer_set_minmax(cp_st *cp) {
 		if (lmn > v) lmn = v;
 		if (lmx < v) lmx = v;
 	}
-	cp->mn = lmn-1;
-	cp->mx = lmx+1;
+	cp->mn = lmn;
+	cp->mx = lmx;
 	// avgs.append(sum(d['raw'][st:en]) / (en-st))
 }
 
-void set_recent_limits(cp_st *cp) {
+void update_smoothed_limits(cp_st *cp) {
 	//for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
-	int i = COL_VDIV8_I;
-	/* for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) { */
-		float v = cp->cols[i];
-		/* printf("  Limit [%d] %f\n", i, v); */
-		if (v < cp->rmin) cp->rmin = v;
-		if (v > cp->rmax) cp->rmax = v;
-	/* } */
+	if (cp->smoothmin == (float)INT_MAX) cp->smoothmin = cp->mn;
+	else cp->smoothmin += (cp->mn - cp->smoothmin)/6;
+
+	if (cp->smoothmax == (float)INT_MIN) cp->smoothmax = cp->mx;
+	else cp->smoothmax += (cp->mx - cp->smoothmax)/6;
+	/* if (v < cp->smoothmin) cp->smoothmin = v; */
+	/* if (v > cp->smoothmax) cp->smoothmax = v; */
 }
-	/* printf("Min:%f Max:%f\n", rmin, rmax); */
+	/* printf("Min:%f Max:%f\n", smoothmin, smoothmax); */
 
 void capsense_proc(cp_st *cp) {
 	/* # Make our own dividing moving average */
@@ -99,10 +102,10 @@ void capsense_proc(cp_st *cp) {
 	/* add_moving_div(d=d, div=256, label='vdiv256') */
 
 	if (!cp->init) {	  // first call we init on data, to suppress jumping vals
-		ringbuffer_setall(cp->rb, cp->cols[COL_VDIV16_I]);
+		ringbuffer_setall(cp->rb_range, cp->cols[COL_VDIV16_I]);
 		cp->init=1;
 	}
-	ringbuffer_add(cp->rb, cp->cols[COL_VDIV16_I]); // Used for moving min/max
+	ringbuffer_add(cp->rb_range, cp->cols[COL_VDIV16_I]); // Used for moving min/max
 	cp_ringbuffer_set_minmax(cp);
 }
 
@@ -147,17 +150,17 @@ void detect_pressevents(cp_st *cp) {
 	/*			 to know what to consider a press or release */
 	/*			 (ie. 2x above slow_average (dst128) for press, */
 	/*			 and 1.5x for release) */
-	float rmin = cp->rmin;
-	float rmax = cp->rmax;
-	float noiserange = rmax - rmin;
-	float starty = rmin;
+	float smoothmin = cp->smoothmin;
+	float smoothmax = cp->smoothmax;
+	float noiserange = smoothmax - smoothmin;
+	float starty = smoothmin;
 	CP_DTYPE *cols = cp->cols;
 	float startyref = cols[COL_VDIV128_I];
 	float startdelta = starty - startyref;
-	float endy = rmin;
+	float endy = smoothmin;
 	float endyref = cols[COL_VDIV128_I];
 	float enddelta = endyref - endy;
-	float chaosy = rmin;
+	float chaosy = smoothmin;
 	float chaosyref = cols[COL_VDIV32_I];
 	float chaosdelta = chaosy - chaosyref;
 	unsigned long ms = cols[COL_MS_I];
@@ -165,14 +168,16 @@ void detect_pressevents(cp_st *cp) {
 	float open_thresh = .3;
 	static int st=0, en=0;
 	//static int stref = 0;
-	static unsigned long sample_count=0;
+	static unsigned long sample_count=-1;
 
 	sample_count++;
 	if (safety_time_start_ms) {
 		unsigned long dist = ms-safety_time_start_ms;
-		printf("Safety: %lu\n", safety_time_start_ms);
-		printf("Millis: %lu\n", ms);
-		printf("Millis-Safety: %lu\n", dist);
+		#if CP_DEBUG > 1
+			printf("Safety: %lu\n", safety_time_start_ms);
+			printf("Millis: %lu\n", ms);
+			printf("Millis-Safety: %lu\n", dist);
+		#endif
 		if (dist > chaos_safety_time_ms) {
 				/* # mark_safety_end(plot=plot, d=d, ms=safety_time_start_ms) */
 			safety_time_start_ms = 0;
@@ -184,49 +189,97 @@ void detect_pressevents(cp_st *cp) {
 	/* # If safety timeout was set and it's too soon, quit */
 	/* # if safety_time_start_ms is not None: */
 	/* #	 if d['millis'][i] - safety_time_start_ms < 2000: return */
+	#if CP_DEBUG > 1
+		printf(BBLA "Cols:");
+		for (int i=1; i<CP_COLCNT; i++) printf(" %.2f", cp->cols[i]);
+		printf(WHI " [Min %.2f Max %.2f]", smoothmin, smoothmax);
+		printf(RST "\n");
+	#endif
 
 	if (cp->bst == BST_OPEN) { // Default state: Open == not a cap-sense press
-		printf("Startdelta=%f > (noiserange=%f * closethresh=%f = %f)\n",
-			startdelta, noiserange, close_thresh, noiserange*close_thresh);
+		#if CP_DEBUG > 1
+			pf(BCYA "BST: BST_OPEN\n" RST);
+			pf(" Startdelta=%f > (noiserange=%f * closethresh=%f = %f)\n",
+				startdelta, noiserange, close_thresh, noiserange*close_thresh);
+		#endif
 
 		if (startdelta > noiserange*close_thresh) {
+			#if CP_DEBUG > 1
+				printf(YEL " -> CLOSED DEBOUNCE\n" RST);
+			#endif
 			st = sample_count;
 			//stref = startyref;
 			cp->bst = BST_CLOSED_DEBOUNCE;
 			//mark_start_try(plot=plot, ms=d['millis'][i], y=starty);
 		}
 	} else if (cp->bst == BST_CLOSED_DEBOUNCE) {
+		#if CP_DEBUG > 1
+			pf(BCYA "BST: BST_CLOSED_DEBOUNCE\n" RST);
+			pf(" (sample_count=%lu-st=%d)=%lu > debounce_samples=%d\n",
+				sample_count, st, sample_count-st, debounce_samples);
+		#endif
 		if (sample_count-st > debounce_samples) {
+			#if CP_DEBUG > 1
+				pf("  Startdelta=%f > (noiserange=%f * closethresh=%f = %f)\n",
+					startdelta, noiserange, close_thresh, noiserange*close_thresh);
+			#endif
 			if (startdelta > noiserange*close_thresh) {
+				#if CP_DEBUG > 1
+					printf(YEL "  -> CLOSED\n" RST);
+				#endif
 				cp->bst = BST_CLOSED;
 				press_start_i = sample_count;
 				press_start_ms = ms;
 				press_start_y = cols[COL_VDIV16_I];;
 				//mark_start_true(plot=plot, ms=d['millis'][i], y=starty);
 			} else {
+				#if CP_DEBUG > 1
+					printf(YEL " -> OPEN\n" RST);
+				#endif
 				cp->bst = BST_OPEN;
 				/* mark_start_abort(plot=plot, ms=d['millis'][i], y=starty) */
 			}
 		}
 	} else if (cp->bst == BST_CLOSED) {
+		#if CP_DEBUG > 1
+			pf(BCYA "BST: BST_CLOSED\n" RST);
+			pf(" fail_safety_points()\n");
+			pf("   future: else if (enddelta=%f > (noiserange=%f * openthresh=%f = %f)\n",
+				enddelta, noiserange, open_thresh, noiserange*open_thresh);
+		#endif
 		if (fail_safety_points(cp, sample_count, ms, starty,
 				noiserange,
 				chaosdelta, chaosy, chaosyref,
 				press_start_y)) {
 			// Tests and issues mark_safety_fail() if needed to plot
+			#if CP_DEBUG > 1
+				printf(YEL "  -> CLOSED\n" RST);
+			#endif
 			cp->bst = BST_OPEN;
 		} else if (enddelta > noiserange*open_thresh) {
+			#if CP_DEBUG > 1
+				printf(YEL " -> OPEN_DEBOUNCE\n" RST);
+			#endif
 			en = sample_count;
 			// mark_end_try(plot=plot, ms=d['millis'][i], y=endy);
 			cp->bst = BST_OPEN_DEBOUNCE;
 		}
 	} else if (cp->bst == BST_OPEN_DEBOUNCE) {
+		#if CP_DEBUG > 1
+			pf(BCYA "BST: BST_OPEN_DEBOUNCE\n" RST);
+		#endif
 		if (sample_count-en > debounce_samples) {
 			if (enddelta > noiserange*open_thresh) {
+				#if CP_DEBUG > 1
+					printf(YEL " -> OPEN\n" RST);
+				#endif
 				cp->bst = BST_OPEN;
 				/* mark_end_true(plot=plot, ms=d['millis'][i], y=endy) */
 				/* mark_pressrange(d['millis'][st], d['millis'][i], d=d, plot=plot) */
 			} else {
+				#if CP_DEBUG > 1
+					printf(YEL " -> CLOSED\n" RST);
+				#endif
 				cp->bst = BST_CLOSED;
 				/* mark_end_false(plot=plot, ms=d['millis'][i], y=endy) */
 				/* plot.vlines(x=[ms], ymin=endyref, ymax=endy, color='red', lw=4) */
@@ -266,7 +319,7 @@ void capsense_procstr(cp_st *cp, char *buf) {
 		exit(1);
 	} else {
 		capsense_proc(cp);
-		set_recent_limits(cp);
+		update_smoothed_limits(cp);
 		detect_pressevents(cp);
 	}
 }

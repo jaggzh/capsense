@@ -7,6 +7,9 @@
 extern "C" {
 #endif
 
+/* #define CP_DEBUG 0 */
+#define CP_DEBUG 1
+
 #define CP_DTYPE float
 #define BST_UNKNOWN         0  // button states
 #define BST_OPEN            1
@@ -32,10 +35,10 @@ extern "C" {
 
 struct capsense_st {
 	CP_DTYPE cols[CP_COLCNT];
-	struct ringbuffer_st rb_real;
-	struct ringbuffer_st *rb;
+	struct ringbuffer_st rb_range_real;
+	struct ringbuffer_st *rb_range;
 	CP_DTYPE mn, mx;
-	float rmin, rmax; // recent min and max (from buffered)
+	float smoothmin, smoothmax; // recent min and max (from buffered)
 	char init;
 	int bst;
 };

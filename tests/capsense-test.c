@@ -31,7 +31,7 @@ cp_st *cp = &cp_real;
 int tw, th;
 rb_st rb_raw_real;
 rb_st *rb_raw;
-float rb_raw_min, rb_raw_max;
+float rb_raw_min=(float)INT_MAX, rb_raw_max=(float)INT_MIN;
 
 /*
 def mark_pressrange(st, en, d=None, plot=None):
@@ -89,8 +89,8 @@ int isfile(char *fn) {
 	return 0;
 }
 
-int scaletx(float v, float rmin, float rmax) {
-	return (((v-rmin) / (rmax-rmin)) * (tw-1)) + 1;
+int scaletx(float v, float vmin, float vmax) {
+	return (((v-vmin) / (vmax-vmin)) * (tw-1)) + 1;
 }
 
 char *rgb_str_fg(int r, int g, int b) {
@@ -120,11 +120,11 @@ void print_rgb_bg(int r, int g, int b) {
 void prow(cp_st *cp, char *row, char **rowfgs) {
 	static char *prior_rowfg=0;
 	if (cp->bst == BST_OPEN_DEBOUNCE) {
-		print_rgb_bg(0,0,90);
-	} else if (cp->bst == BST_OPEN) {
 		print_rgb_bg(0,0,50);
+	} else if (cp->bst == BST_OPEN) {
+		print_rgb_bg(0,0,150);
 	} else if (cp->bst == BST_CLOSED_DEBOUNCE) {
-		print_rgb_bg(0,90,0);
+		print_rgb_bg(0,40,0);
 	} else if (cp->bst == BST_CLOSED) {
 		print_rgb_bg(0,155,0);
 	} else {
@@ -193,8 +193,17 @@ void cptest_ringbuffer_set_minmax(float *minp, float *maxp, rb_st *rb) {
 		if (lmn > v) lmn = v;
 		if (lmx < v) lmx = v;
 	}
-	*minp = lmn-1;
-	*maxp = lmx+1;
+	if (*minp == (float)INT_MAX) *minp = lmn; 
+	else {
+		if (lmn < *minp) *minp = lmn;  // force limit so graph will always be
+		else *minp += (lmn - *minp)/6; // within range. otherwise smooth the change
+	}
+
+	if (*maxp == (float)INT_MIN) *maxp = lmx; 
+	else {
+		if (lmx > *maxp) *maxp = lmx;
+		else *maxp += (lmx - *maxp)/6;
+	}
 }
 
 void pcols(cp_st *cp) {
@@ -221,7 +230,8 @@ void pcols(cp_st *cp) {
 	/* ringbuffer_print(rb_raw); */
 	cptest_ringbuffer_set_minmax(&rb_raw_min, &rb_raw_max, rb_raw);
 	#ifdef CPT_DEBUG_PAT
-		printf("cp->mn = %f, cp->mx = %f\n", cp->mn, cp->mx);
+		printf("raw_min = %f, raw_max = %f\n", rb_raw_min, rb_raw_max);
+		printf(" cp->mn = %f,  cp->mx = %f\n", cp->mn, cp->mx);
 	#endif
 
 	for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
@@ -238,8 +248,8 @@ void pcols(cp_st *cp) {
 	}
 	//for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
 	//
-	pat(cp, scaletx(cp->mn, rb_raw_min, rb_raw_max)-1, cp->mn, '{', RGB_FG(250,0,0), 0, 0);
-	pat(cp, scaletx(cp->mx, rb_raw_min, rb_raw_max)+1, cp->mx, '}', RGB_FG(0,250,0), 0, 0);
+	pat(cp, scaletx(cp->smoothmin, rb_raw_min, rb_raw_max)-1, cp->mn, '{', RGB_FG(250,0,0), 0, 0);
+	pat(cp, scaletx(cp->smoothmax, rb_raw_min, rb_raw_max)+1, cp->mx, '}', RGB_FG(0,250,0), 0, 0);
 	for (int i=0; i<CP_COLCNT; i++) {
 		char colchar = colchars[i];
 		if (colchar) {
@@ -286,7 +296,7 @@ int main(int argc, char *argv[]) {
 	capsense_init(cp);
 	while (fgets(buf, CP_LINEBUFSIZE, f)) {
 		capsense_procstr(cp, buf);
-		printf("\033[41;1mSTATE: bst=%d\033[0m", cp->bst);
+		/* printf("\033[41;1mSTATE: bst=%d\033[0m\n", cp->bst); */
 		pcols(cp);
 	}
 }
