@@ -1,16 +1,20 @@
 #define _IN_CAPSENSE_PROC_C
-#include <ringbuffer/ringbuffer.h>
+#include <Arduino.h>
 #include <limits.h>  // INT_MIN/MAX
 #include <stdlib.h>  // strtof()
 #include <errno.h>
 #include <stdio.h>	// printf
 
+#include "ringbuffer.h"
 #include "capsense.h"
+#include "capproc.h"
 
+#if 0 // esp32 build doesn't define ARDUINO. Bleh.
 #ifndef ARDUINO
 #include "tests/millis.h"
 #include "tests/bansi.h"
 #endif
+#endif // 0
 
 #define pf printf
 
@@ -39,15 +43,15 @@ int press_start_i = -1;
 int press_start_ms = -1;
 float press_start_y = 0;
 
-char *colnames[CP_COLCNT] = {
+const char *colnames[CP_COLCNT] = {
 	"millis", "raw", "vdiv4", "vdiv8", "vdiv16",
 	"vdiv32", "vdiv64", "vdiv128", "vdiv128a"
 };
-char colchars[CP_COLCNT] = {
+const char colchars[CP_COLCNT] = {
 	0, '*', 0, 0, '5',
 	'6', '7', '8', 'a'
 };
-char *colfgs[CP_COLCNT] = {
+const char *colfgs[CP_COLCNT] = {
 	0, "\033[38;2;128;128;128m", 0, 0, "\033[38;2;255;255;0m",
 	"\033[38;2;255;0;255m", "\033[38;2;0;127;127m", 0, "\033[38;2;0;255;255m"
 };
@@ -141,6 +145,24 @@ char fail_safety_points(cp_st *cp, int i, int ms, int y,
 	return 0;
 }
 
+void (*_cp_cb_press)();
+void (*_cp_cb_release)();
+
+void set_cb_press(void (*cb)()) {
+	_cp_cb_press = cb;
+}
+void set_cb_release(void (*cb)()) {
+	_cp_cb_release = cb;
+}
+
+
+void trigger_press(cp_st *cp) {
+	(*_cp_cb_press)();
+}
+void trigger_release(cp_st *cp) {
+	(*_cp_cb_release)();
+}
+
 void detect_pressevents(cp_st *cp) {
 	/* global press_start_i */
 	/* global press_start_ms */
@@ -232,6 +254,7 @@ void detect_pressevents(cp_st *cp) {
 				press_start_ms = ms;
 				press_start_y = cols[COL_VDIV16_I];;
 				//mark_start_true(plot=plot, ms=d['millis'][i], y=starty);
+				trigger_release(cp);
 			} else {
 				#if CP_DEBUG > 1
 					printf(YEL " -> OPEN\n" RST);
@@ -276,6 +299,7 @@ void detect_pressevents(cp_st *cp) {
 				cp->bst = BST_OPEN;
 				/* mark_end_true(plot=plot, ms=d['millis'][i], y=endy) */
 				/* mark_pressrange(d['millis'][st], d['millis'][i], d=d, plot=plot) */
+				trigger_press(cp);
 			} else {
 				#if CP_DEBUG > 1
 					printf(YEL " -> CLOSED\n" RST);

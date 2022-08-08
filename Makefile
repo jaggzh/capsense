@@ -19,7 +19,9 @@ tests/capsense-test: tests/capsense-test.c capsense.c capsense.h \
 		-Wall -o tests/capsense-test \
 		tests/capsense-test.c \
 		capsense.c \
-		../ringbuffer/ringbuffer.c \
+		capproc.c \
+		ringbuffer.c \
+		ringbuffer.h \
 		tests/millis.c \
 		tests/termsize.c
 
@@ -31,12 +33,14 @@ vi:
 	vim Makefile \
 		tests/capsense-test.c \
 		capsense.c \
+		capsense.h \
+		capproc.c \
+		capproc.h \
 		sense-presses.py \
 		tests/bansi.c \
 		tests/bansi.h \
-		capsense.h \
-		../ringbuffer/ringbuffer.c \
-		../ringbuffer/ringbuffer.h \
+		ringbuffer.c \
+		ringbuffer.h \
 		tests/millis.c \
 		tests/millis.h \
 		tests/termsize.c \

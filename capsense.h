@@ -1,14 +1,15 @@
 #ifndef _CAPSENSE_PROC_H
 #define _CAPSENSE_PROC_H
 
-#include <ringbuffer/ringbuffer.h>
+#include "ringbuffer.h"
+#include "capproc.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* #define CP_DEBUG 0 */
-#define CP_DEBUG 1
+#define CP_DEBUG 0
+/* #define CP_DEBUG 1 */
 
 #define CP_DTYPE float
 #define BST_UNKNOWN         0  // button states
@@ -48,6 +49,8 @@ void ringbuffer_minmax(cp_st *cp, RB_DTYPE mn, RB_DTYPE mx);
 void capsense_init(cp_st *cp);
 void capsense_proc(cp_st *cp);
 void capsense_procstr(cp_st *cp, char *buf);
+void set_cb_press(void (*cb)());
+void set_cb_release(void (*cb)());
 
 #ifndef _IN_CAPSENSE_PROC_C
 	extern char colchars[CP_COLCNT];
