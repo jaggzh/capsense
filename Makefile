@@ -35,8 +35,8 @@ vi:
 		capsense.cpp \
 		capsense.h \
 		capproc.cpp \
-		capproc.h \
 		sense-presses.py \
+		capproc.h \
 		tests/bansi.c \
 		tests/bansi.h \
 		ringbuffer.c \

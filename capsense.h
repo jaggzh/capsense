@@ -18,7 +18,6 @@
 // 71677 316 359.89 361.65 362.22 362.57 363.15
 // 71690 310 347.41 358.42 360.59 361.75 362.74
 #define CP_LINEBUFSIZE 1000
-#define CP_COLCNT 9
 #define CP_COL_DATASTART 1   // don't want to normalize/scale off the growing ms column
 #define COL_MS_I       0
 #define COL_RAW_I      1
@@ -29,6 +28,8 @@
 #define COL_VDIV64_I   6
 #define COL_VDIV128_I  7
 #define COL_VDIV128a_I 8
+#define COL_VDIV256_I  9
+#define CP_COLCNT   10
 
 struct capsense_st {
 	CP_DTYPE cols[CP_COLCNT];

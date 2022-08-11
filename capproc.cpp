@@ -24,6 +24,7 @@ void procval(uint16_t v) {
 	static float avg64=v;
 	static float avg128=v;
 	static float avg128a=v; // Assymetric (drops faster)
+	static float avg256=v;
 	/* avg_short += (v-avg_short)/avg_div; */
 	avg4 += (v-avg4)/4;
 	avg8 += (v-avg8)/8;
@@ -31,6 +32,7 @@ void procval(uint16_t v) {
 	avg32 += (v-avg32)/32;
 	avg64 += (v-avg64)/64;
 	avg128 += (v-avg128)/128;
+	avg256 += (v-avg256)/256;
 	if (v-avg128a > 0) {  // Assymetric avg (drops faster than rises)
 		avg128a += (v-avg128a)/128;
 	} else {
@@ -46,6 +48,7 @@ void procval(uint16_t v) {
 	_capdata->cols[COL_VDIV64_I] = avg64;
 	_capdata->cols[COL_VDIV128_I] = avg128;
 	_capdata->cols[COL_VDIV128a_I] = avg128a;
+	_capdata->cols[COL_VDIV256_I] = avg256;
 	#ifdef CAP_DUMP_DATA
 		DSP(now);
 		DSP(' ');

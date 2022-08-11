@@ -154,7 +154,7 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
         #             to know what to consider a press or release
         #             (ie. 2x above slow_average (dst128) for press,
         #             and 1.5x for release)
-        d['vdiv256'][i] = d['vdiv256'][i-1] + (d['vdiv64'][i]-d['vdiv256'][i-1])/256
+        d['vdiv256'][i] = d['vdiv256'][i-1] + (d['raw'][i]-d['vdiv256'][i-1])/256
         noiserange = maxs[i] - mins[i]
         starty = mins[i]
         #startyref = d['vdiv128'][i]
@@ -261,12 +261,11 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
                 #             press_start_y=press_start_y,
                 #             max_since_press = max_since_press,
                 #             open_drop_fraction = open_drop_fraction)
-            # elif max_since_press - open_tracking_val >
-            #         (max_since_press - open_tracking_val)
-            #     en = i
-            #     mark_end_try(plot=plot, ms=d['millis'][i], y=endy)
-            #     print(" -> OPEN_DEBOUNCE");
-            #     bst = 'open_debounce'
+            elif enddelta > noiserange*open_thresh:
+                en = i
+                mark_end_try(plot=plot, ms=d['millis'][i], y=endy)
+                print(" -> OPEN_DEBOUNCE");
+                bst = 'open_debounce'
         elif bst == 'open_debounce':
             pfp(bcya, "BST: OPEN_DEBOUNCE", rst);
             if i-en > debounce_samples:

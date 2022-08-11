@@ -42,6 +42,19 @@ int cmillis = 0;
 int press_start_i = -1;
 int press_start_ms = -1;
 float press_start_y = 0;
+float max_since_press = -1;
+
+void (*_cp_cb_press)();
+void (*_cp_cb_release)();
+
+void set_cb_press(void (*cb)()) {
+	_cp_cb_press = cb;
+}
+void set_cb_release(void (*cb)()) {
+	_cp_cb_release = cb;
+}
+
+
 
 const char *colnames[CP_COLCNT] = {
 	"millis", "raw", "vdiv4", "vdiv8", "vdiv16",
@@ -145,17 +158,6 @@ char fail_safety_points(cp_st *cp, int i, int ms, int y,
 	return 0;
 }
 
-void (*_cp_cb_press)();
-void (*_cp_cb_release)();
-
-void set_cb_press(void (*cb)()) {
-	_cp_cb_press = cb;
-}
-void set_cb_release(void (*cb)()) {
-	_cp_cb_release = cb;
-}
-
-
 void trigger_press(cp_st *cp) {
 	Serial.print("PRESS EVENT: ");
 	Serial.println((int)_cp_cb_press);
@@ -165,6 +167,14 @@ void trigger_release(cp_st *cp) {
 	Serial.print("RELEASE EVENT: ");
 	Serial.println((int)_cp_cb_release);
 	/* (*_cp_cb_release)(); */
+}
+
+char reading_is_open(float cval, float press_start_y,
+	                 float max_since_press, float open_drop_fraction) {
+    float height = max_since_press - press_start_y;
+    if (cval < max_since_press - height*open_drop_fraction)
+    	return 1;
+    return 0;
 }
 
 void detect_pressevents(cp_st *cp) {
@@ -190,7 +200,9 @@ void detect_pressevents(cp_st *cp) {
 	float chaosyref = cols[COL_VDIV32_I];
 	float chaosdelta = chaosy - chaosyref;
 	unsigned long ms = cols[COL_MS_I];
-	float close_thresh = .8;
+	float open_tracking_value = cp->smoothmin;
+	float open_drop_fraction = .7;
+	float close_thresh = 1.9;
 	float open_thresh = .3;
 	static int st=0, en=0;
 	//static int stref = 0;
@@ -256,7 +268,9 @@ void detect_pressevents(cp_st *cp) {
 				cp->bst = BST_CLOSED;
 				press_start_i = sample_count;
 				press_start_ms = ms;
-				press_start_y = cols[COL_VDIV16_I];;
+				press_start_y = cols[COL_VDIV16_I];
+				// ***** RESETTING AN AVERAGE HERE \/ \/
+				cp->cols[COL_VDIV256_I] = open_tracking_value;
 				//mark_start_true(plot=plot, ms=d['millis'][i], y=starty);
 				trigger_press(cp);
 			} else {
@@ -274,6 +288,12 @@ void detect_pressevents(cp_st *cp) {
 			pf("   future: else if (enddelta=%f > (noiserange=%f * openthresh=%f = %f)\n",
 				enddelta, noiserange, open_thresh, noiserange*open_thresh);
 		#endif
+
+		// Raising detected peak of press values
+		if (max_since_press < open_tracking_value) max_since_press = open_tracking_value;
+		char isopen = reading_is_open(open_tracking_value, press_start_y,
+					max_since_press, open_drop_fraction);
+
 		if (fail_safety_points(cp, sample_count, ms, starty,
 				noiserange,
 				chaosdelta, chaosy, chaosyref,
@@ -283,7 +303,7 @@ void detect_pressevents(cp_st *cp) {
 				printf(YEL "  -> CLOSED\n" RST);
 			#endif
 			cp->bst = BST_OPEN;
-		} else if (enddelta > noiserange*open_thresh) {
+		} else if (isopen || enddelta > noiserange*open_thresh) {
 			#if CP_DEBUG > 1
 				printf(YEL " -> OPEN_DEBOUNCE\n" RST);
 			#endif
@@ -296,7 +316,10 @@ void detect_pressevents(cp_st *cp) {
 			pf(BCYA "BST: BST_OPEN_DEBOUNCE\n" RST);
 		#endif
 		if (sample_count-en > debounce_samples) {
-			if (enddelta > noiserange*open_thresh) {
+			char isopen = reading_is_open(open_tracking_value, press_start_y,
+						max_since_press, open_drop_fraction);
+			// if (enddelta > noiserange*open_thresh) {
+			if (isopen) {
 				#if CP_DEBUG > 1
 					printf(YEL " -> OPEN\n" RST);
 				#endif
