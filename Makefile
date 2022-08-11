@@ -15,11 +15,11 @@ capsense_test_debug: tests/capsense-test
 
 tests/capsense-test: tests/capsense-test.c capsense.c capsense.h \
 	../ringbuffer/ringbuffer.c tests/millis.c tests/termsize.c
-	gcc -ggdb3 -I. -I.. \
+	g++ -ggdb3 -I. -I.. \
 		-Wall -o tests/capsense-test \
 		tests/capsense-test.c \
-		capsense.c \
-		capproc.c \
+		capsense.cpp \
+		capproc.cpp \
 		ringbuffer.c \
 		ringbuffer.h \
 		tests/millis.c \
@@ -32,9 +32,9 @@ unfulfilled:
 vi:
 	vim Makefile \
 		tests/capsense-test.c \
-		capsense.c \
+		capsense.cpp \
 		capsense.h \
-		capproc.c \
+		capproc.cpp \
 		capproc.h \
 		sense-presses.py \
 		tests/bansi.c \

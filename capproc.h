@@ -1,11 +1,9 @@
 #ifndef _CAPPROC_H
 #define _CAPPROC_H
 
-#include "capsense.h"
+#define CAP_DUMP_DATA
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "capsense.h"
 
 //#define CAPPROC_SERIAL_DEBUG // define if you want serial debug output
 //#define CAPPROC_SERIAL_INIT  // define if you want serial debug output and want us to init it
@@ -39,10 +37,6 @@ Info:
 
 void setup_cap();
 void loop_cap(unsigned long now); // now: pass current millis()
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // /_CAPPROC_H
 

@@ -4,10 +4,6 @@
 #include "ringbuffer.h"
 #include "capproc.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #define CP_DEBUG 0
 /* #define CP_DEBUG 1 */
 
@@ -52,16 +48,14 @@ void capsense_procstr(cp_st *cp, char *buf);
 void set_cb_press(void (*cb)());
 void set_cb_release(void (*cb)());
 
+void update_smoothed_limits(cp_st *cp);
+void detect_pressevents(cp_st *cp);
+
 #ifndef _IN_CAPSENSE_PROC_C
 	extern char colchars[CP_COLCNT];
 	extern char *colnames[CP_COLCNT];
 	extern char *colfgs[CP_COLCNT];
 #endif // /_IN_CAPSENSE_PROC_C
-
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // /_CAPSENSE_PROC_H
 
