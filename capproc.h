@@ -38,5 +38,9 @@ Info:
 void setup_cap();
 void loop_cap(unsigned long now); // now: pass current millis()
 
+#ifndef _IN_CAPPROC_H
+	extern char cp_sense_debug_data;
+#endif // /_IN_CAPPROC_H
+
 #endif // /_CAPPROC_H
 

@@ -171,8 +171,8 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
         resetref = d['vdiv128'][i]
         open_tracking_value = mins[i]
         open_drop_fraction = .7
-        close_thresh = 1.9
-        open_thresh = .3
+        close_thresh = .8
+        open_thresh = .5
 
         if safety_time_start is not None:
             dist = ms-safety_time_start

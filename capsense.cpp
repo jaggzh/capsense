@@ -200,10 +200,10 @@ void detect_pressevents(cp_st *cp) {
 	float chaosyref = cols[COL_VDIV32_I];
 	float chaosdelta = chaosy - chaosyref;
 	unsigned long ms = cols[COL_MS_I];
-	float open_tracking_value = cp->smoothmin;
+	float open_tracking_value = cols[COL_VDIV64_I];
 	float open_drop_fraction = .7;
-	float close_thresh = 1.9;
-	float open_thresh = .3;
+	float close_thresh = .8;
+	float open_thresh = .5;
 	static int st=0, en=0;
 	//static int stref = 0;
 	static unsigned long sample_count=-1;

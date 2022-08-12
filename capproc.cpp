@@ -14,6 +14,7 @@ cp_st _capdata_real;
 cp_st *_capdata;
 
 uint16_t avg_div=4;
+char cp_sense_debug_data=1;
 
 void procval(uint16_t v) {
 	/* static float avg_short=v; */
@@ -50,6 +51,7 @@ void procval(uint16_t v) {
 	_capdata->cols[COL_VDIV128a_I] = avg128a;
 	_capdata->cols[COL_VDIV256_I] = avg256;
 	#ifdef CAP_DUMP_DATA
+	if (cp_sense_debug_data) {
 		DSP(now);
 		DSP(' ');
 		DSP(v);
@@ -68,6 +70,7 @@ void procval(uint16_t v) {
 		DSP(' ');
 		DSP(avg128a); // assymetric
 		DSP('\n');
+	}
 	#endif
 	capsense_proc(_capdata);
 	update_smoothed_limits(_capdata);
