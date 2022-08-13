@@ -1,12 +1,16 @@
 
-#include <HardwareSerial.h>
+#if ARDUENV
+	#include <HardwareSerial.h>
+	#include <Arduino.h>
+#endif
 #include <PrintHero.h>
-#include <Arduino.h>
 
 #include "capproc.h"
 
 #define MAGICCHUNK_DEBUG
 #include "MagicSerialDechunk.h"
+#include "tests/millis.h"
+#include "testdefs.h"
 
 struct SerialDechunk dechunk_real;
 struct SerialDechunk *dechunk = &dechunk_real;
@@ -50,6 +54,7 @@ void procval(uint16_t v) {
 	_capdata->cols[COL_VDIV128_I] = avg128;
 	_capdata->cols[COL_VDIV128a_I] = avg128a;
 	_capdata->cols[COL_VDIV256_I] = avg256;
+	// ^  we set COL_VDIFF_I below
 	#ifdef CAP_DUMP_DATA
 	if (cp_sense_debug_data) {
 		DSP(now);
@@ -74,6 +79,7 @@ void procval(uint16_t v) {
 	#endif
 	capsense_proc(_capdata);
 	update_smoothed_limits(_capdata);
+	update_diff(_capdata);
 	detect_pressevents(_capdata);
 }
 
@@ -126,7 +132,9 @@ void setup_cap() {
 	_capdata = &_capdata_real;
 	capsense_init(_capdata);
 
-	Serial2.begin(SENSOR_BAUD, SERIAL_8N1, RXPIN, TXPIN);
+	#ifdef ESP_PLATFORM
+		Serial2.begin(SENSOR_BAUD, SERIAL_8N1, RXPIN, TXPIN);
+	#endif
 	serial_dechunk_init(dechunk, CHUNKSIZE, dechunk_cb);
 }
 
@@ -145,17 +153,19 @@ void loop_cap(unsigned long now) { // now: pass current millis()
 	#endif
 	if (now - last_sensor_serial_check > SENSOR_DELAY_MS) {
 		last_sensor_serial_check = now;
-		if (Serial2.available()) {
-			uint8_t c = Serial2.read();
-			/* DSP(c); */
-			/* ++wrap; */
-			/* if (wrap == 8) DSP("  "); */
-			/* else if (wrap >= 16) { wrap=0; DSP('\n'); } */
-			/* else DSP(' '); */
-			dechunk->add(dechunk, c);
-		} else {
-			/* DSP("No ser.available()\n"); */
-		}
+		#ifdef ESP_PLATFORM
+			if (Serial2.available()) {
+				uint8_t c = Serial2.read();
+				/* DSP(c); */
+				/* ++wrap; */
+				/* if (wrap == 8) DSP("  "); */
+				/* else if (wrap >= 16) { wrap=0; DSP('\n'); } */
+				/* else DSP(' '); */
+				dechunk->add(dechunk, c);
+			} else {
+				/* DSP("No ser.available()\n"); */
+			}
+		#endif
 	}
 }
 

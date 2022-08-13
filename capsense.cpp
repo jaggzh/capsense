@@ -1,13 +1,17 @@
 #define _IN_CAPSENSE_PROC_C
-#include <Arduino.h>
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+	#include <Arduino.h>
+#endif
 #include <limits.h>  // INT_MIN/MAX
 #include <stdlib.h>  // strtof()
 #include <errno.h>
 #include <stdio.h>	// printf
 
+#include "testdefs.h"
 #include "ringbuffer.h"
 #include "capsense.h"
 #include "capproc.h"
+#include "tests/millis.h"
 
 #if 0 // esp32 build doesn't define ARDUINO. Bleh.
 #ifndef ARDUINO
@@ -21,7 +25,7 @@
 /* Handle capacitive sensor samples */
 // 164 samples/sec currently
 int sps = 164;
-int debounce_samples = 5;	// ~ 30ms
+int debounce_samples = 15;	// ~ 30ms
 // debounce_wait_time = debounce_samples * (1/164);
 // .0060975609s / sample
 
@@ -35,7 +39,7 @@ int debounce_samples = 5;	// ~ 30ms
  */
 int grip_eval_checkpoint_ms = 60;
 int grip_eval_delay_samples;	 // Set in capsense_init()
-int chaos_safety_time_ms = 1000; // datetime.timedelta(milliseconds=1000);
+unsigned long chaos_safety_time_ms = 1000; // datetime.timedelta(milliseconds=1000);
 unsigned long safety_time_start_ms = 0; // None
 
 int cmillis = 0;
@@ -108,6 +112,13 @@ void update_smoothed_limits(cp_st *cp) {
 }
 	/* printf("Min:%f Max:%f\n", smoothmin, smoothmax); */
 
+void update_diff(cp_st *cp) {
+	static float priorval=0;
+	float diff = cp->smoothmin - priorval;
+	cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
+	priorval = diff;
+}
+
 void capsense_proc(cp_st *cp) {
 	/* # Make our own dividing moving average */
 	/* def add_moving_div(d=None, div=None, label=None): */
@@ -121,6 +132,7 @@ void capsense_proc(cp_st *cp) {
 	if (!cp->init) {	  // first call we init on data, to suppress jumping vals
 		ringbuffer_setall(cp->rb_range, cp->cols[COL_VDIV16_I]);
 		cp->init=1;
+		cp->cols[COL_VDIFF_I] = 0;
 	}
 	ringbuffer_add(cp->rb_range, cp->cols[COL_VDIV16_I]); // Used for moving min/max
 	cp_ringbuffer_set_minmax(cp);
@@ -144,6 +156,7 @@ void mark_safety_end(int ms) {
 char fail_safety_points(cp_st *cp, int i, int ms, int y,
 		float noiserange, float chaosdelta,
 		int chaosy, int chaosyref, int curd) {
+	return 0;
 	if (i - press_start_i > grip_eval_delay_samples) {
 		if (y > curd + noiserange*2) {
 			safety_time_start_ms = ms;
@@ -159,13 +172,13 @@ char fail_safety_points(cp_st *cp, int i, int ms, int y,
 }
 
 void trigger_press(cp_st *cp) {
-	Serial.print("PRESS EVENT: ");
-	Serial.println((int)_cp_cb_press);
+	spa("PRESS EVENT: ");
+	spal((int)_cp_cb_press);
 	/* (*_cp_cb_press)(); */
 }
 void trigger_release(cp_st *cp) {
-	Serial.print("RELEASE EVENT: ");
-	Serial.println((int)_cp_cb_release);
+	spa("RELEASE EVENT: ");
+	spal((int)_cp_cb_release);
 	/* (*_cp_cb_release)(); */
 }
 
@@ -174,6 +187,15 @@ char reading_is_open(float cval, float press_start_y,
     float height = max_since_press - press_start_y;
     if (cval < max_since_press - height*open_drop_fraction)
     	return 1;
+    return 0;
+}
+
+char diff_says_closed(float diff, float noiserange, float close_mult_diff) {
+    if (diff > noiserange * close_mult_diff) return 1;
+    return 0;
+}
+char diff_says_open(float diff, float noiserange, float close_mult_diff) {
+    if (diff < -noiserange * close_mult_diff) return 1;
     return 0;
 }
 
@@ -191,8 +213,8 @@ void detect_pressevents(cp_st *cp) {
 	float noiserange = smoothmax - smoothmin;
 	float starty = smoothmin;
 	CP_DTYPE *cols = cp->cols;
-	float startyref = cols[COL_VDIV128_I];
-	float startdelta = starty - startyref;
+	/* float startyref = cols[COL_VDIV128_I]; */
+	/* float startdelta = starty - startyref; */
 	float endy = smoothmin;
 	float endyref = cols[COL_VDIV128_I];
 	float enddelta = endyref - endy;
@@ -201,9 +223,14 @@ void detect_pressevents(cp_st *cp) {
 	float chaosdelta = chaosy - chaosyref;
 	unsigned long ms = cols[COL_MS_I];
 	float open_tracking_value = cols[COL_VDIV64_I];
-	float open_drop_fraction = .7;
-	float close_thresh = .8;
+	/* float open_drop_fraction = .7; */
+	/* float close_thresh = .8; */
 	float open_thresh = .5;
+	float close_mult_diff = .01; //  Adapt differential to size of noise-level
+	/* float open_mult_diff = .01; */
+	float diff = cp->cols[COL_VDIFF_I];
+	char diclo=0, diopen=1;
+
 	static int st=0, en=0;
 	//static int stref = 0;
 	static unsigned long sample_count=-1;
@@ -234,6 +261,9 @@ void detect_pressevents(cp_st *cp) {
 		printf(RST "\n");
 	#endif
 
+	diclo = diff_says_closed(diff, noiserange, close_mult_diff);
+	diopen = diff_says_open(diff, noiserange, close_mult_diff);
+
 	if (cp->bst == BST_OPEN) { // Default state: Open == not a cap-sense press
 		#if CP_DEBUG > 1
 			pf(BCYA "BST: BST_OPEN\n" RST);
@@ -241,7 +271,8 @@ void detect_pressevents(cp_st *cp) {
 				startdelta, noiserange, close_thresh, noiserange*close_thresh);
 		#endif
 
-		if (startdelta > noiserange*close_thresh) {
+		/* if (startdelta > noiserange*close_thresh) { */
+		if (diclo) {
 			#if CP_DEBUG > 1
 				printf(YEL " -> CLOSED DEBOUNCE\n" RST);
 			#endif
@@ -256,12 +287,13 @@ void detect_pressevents(cp_st *cp) {
 			pf(" (sample_count=%lu-st=%d)=%lu > debounce_samples=%d\n",
 				sample_count, st, sample_count-st, debounce_samples);
 		#endif
-		if (sample_count-st > debounce_samples) {
+		if ((int)sample_count-st > debounce_samples) {
 			#if CP_DEBUG > 1
 				pf("  Startdelta=%f > (noiserange=%f * closethresh=%f = %f)\n",
 					startdelta, noiserange, close_thresh, noiserange*close_thresh);
 			#endif
-			if (startdelta > noiserange*close_thresh) {
+			/* if (startdelta > noiserange*close_thresh) { */
+			if (diclo) {
 				#if CP_DEBUG > 1
 					printf(YEL "  -> CLOSED\n" RST);
 				#endif
@@ -270,7 +302,7 @@ void detect_pressevents(cp_st *cp) {
 				press_start_ms = ms;
 				press_start_y = cols[COL_VDIV16_I];
 				// ***** RESETTING AN AVERAGE HERE \/ \/
-				cp->cols[COL_VDIV256_I] = open_tracking_value;
+				// cp->cols[COL_VDIV256_I] = open_tracking_value;
 				//mark_start_true(plot=plot, ms=d['millis'][i], y=starty);
 				trigger_press(cp);
 			} else {
@@ -282,6 +314,10 @@ void detect_pressevents(cp_st *cp) {
 			}
 		}
 	} else if (cp->bst == BST_CLOSED) {
+			//        __ _t
+			//   /   /  \    \ h*tolerance
+			//  h   /    \__ / ___
+			//   \ /      \    \  considered open 
 		#if CP_DEBUG > 1
 			pf(BCYA "BST: BST_CLOSED\n" RST);
 			pf(" fail_safety_points()\n");
@@ -291,8 +327,8 @@ void detect_pressevents(cp_st *cp) {
 
 		// Raising detected peak of press values
 		if (max_since_press < open_tracking_value) max_since_press = open_tracking_value;
-		char isopen = reading_is_open(open_tracking_value, press_start_y,
-					max_since_press, open_drop_fraction);
+		/* char isopen = reading_is_open(open_tracking_value, press_start_y, */
+		/* 			max_since_press, open_drop_fraction); */
 
 		if (fail_safety_points(cp, sample_count, ms, starty,
 				noiserange,
@@ -303,7 +339,8 @@ void detect_pressevents(cp_st *cp) {
 				printf(YEL "  -> CLOSED\n" RST);
 			#endif
 			cp->bst = BST_OPEN;
-		} else if (isopen || enddelta > noiserange*open_thresh) {
+		//} else if (isopen || enddelta > noiserange*open_thresh) {
+		} else if (diopen || enddelta > noiserange*open_thresh) {
 			#if CP_DEBUG > 1
 				printf(YEL " -> OPEN_DEBOUNCE\n" RST);
 			#endif
@@ -315,11 +352,12 @@ void detect_pressevents(cp_st *cp) {
 		#if CP_DEBUG > 1
 			pf(BCYA "BST: BST_OPEN_DEBOUNCE\n" RST);
 		#endif
-		if (sample_count-en > debounce_samples) {
-			char isopen = reading_is_open(open_tracking_value, press_start_y,
-						max_since_press, open_drop_fraction);
+		if ((int)(sample_count-en) > debounce_samples) {
+			/* char isopen = reading_is_open(open_tracking_value, press_start_y, */
+			/* 			max_since_press, open_drop_fraction); */
 			// if (enddelta > noiserange*open_thresh) {
-			if (isopen) {
+			/* if (isopen) { */
+			if (diopen) {
 				#if CP_DEBUG > 1
 					printf(YEL " -> OPEN\n" RST);
 				#endif
@@ -371,6 +409,7 @@ void capsense_procstr(cp_st *cp, char *buf) {
 	} else {
 		capsense_proc(cp);
 		update_smoothed_limits(cp);
+		update_diff(cp);
 		detect_pressevents(cp);
 	}
 }

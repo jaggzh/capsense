@@ -13,11 +13,15 @@ capsense_test_debug: tests/capsense-test
 	gdb --args tests/capsense-test "${CPLOG}"
 
 
-tests/capsense-test: tests/capsense-test.c capsense.c capsense.h \
+tests/capsense-test: tests/capsense-test.cpp capsense.cpp capsense.h \
 	../ringbuffer/ringbuffer.c tests/millis.c tests/termsize.c
 	g++ -ggdb3 -I. -I.. \
+		-I${HOME}/Arduino/libraries/PrintHero/src \
+		-L${HOME}/Arduino/libraries/PrintHero/src \
+		-I${HOME}/Arduino/libraries/MagicSerialDechunk/src \
+		-L${HOME}/Arduino/libraries/MagicSerialDechunk/src \
 		-Wall -o tests/capsense-test \
-		tests/capsense-test.c \
+		tests/capsense-test.cpp \
 		capsense.cpp \
 		capproc.cpp \
 		ringbuffer.c \
@@ -31,7 +35,7 @@ unfulfilled:
 
 vi:
 	vim Makefile \
-		tests/capsense-test.c \
+		tests/capsense-test.cpp \
 		capsense.cpp \
 		capsense.h \
 		capproc.cpp \

@@ -17,7 +17,7 @@ from bh.bansi import *
 
 # 164 samples/sec currently
 sps = 164
-debounce_samples = 5   # ~ 30ms
+debounce_samples = 15   # ~ 30ms
 debounce_wait_time = debounce_samples * (1/164)
 # .0060975609s / sample
 
@@ -110,6 +110,8 @@ def fail_safety_points(plot=None, d=None, i=None, ms=None, y=None,
     global press_start_i
     global press_start_ms
 
+    return False
+
     if i - press_start_i > grip_eval_samples_retest/2 and \
         i - press_start_i < grip_eval_samples_retest and \
             y > d['vdiv16'][press_start_i] + noiserange*grip_eval_rise_scale:
@@ -135,6 +137,12 @@ def reading_is_open(cval=None,
         return True
     return False
 
+def diff_says_closed(diff=None, noiserange=None, close_mult_diff=None):
+    if diff > noiserange * close_mult_diff: return True
+    return False
+def diff_says_open(diff=None, noiserange=None, open_mult_diff=None):
+    if diff < -noiserange * open_mult_diff: return True
+    return False
 
 dobreak = False
 def plot_presses(d=None, mins=None, maxs=None, avgs=None,
@@ -173,6 +181,8 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
         open_drop_fraction = .7
         close_thresh = .8
         open_thresh = .5
+        close_mult_diff = .01  # Adapt differential to size of noise-level
+        open_mult_diff = .01  # Adapt differential to size of noise-level
 
         if safety_time_start is not None:
             dist = ms-safety_time_start
@@ -193,12 +203,23 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
         for k in d.keys()[1:]: print(f" {d[k][i]:.2f}", end='')
         pf(f"{whi} [Min {mins[i]:.2f}, Max {maxs[i]:.2f}]{rst}")
 
+        print(f"{bgred}{whi}Noise: {noiserange:.4f}, noiseX={noiserange*close_mult_diff:.5f}, diff[{i}]={d['diffs'][i]:.4f}{rst}");
+
+        # Used for            open -> closed_debounce,
+        #      and closed_debounce -> closed
+        diclo = diff_says_closed(diff=d['diffs'][i],
+                                 noiserange=noiserange,
+                                 close_mult_diff=close_mult_diff)
+        diopen = diff_says_open(diff=d['diffs'][i],
+                                 noiserange=noiserange,
+                                 open_mult_diff=open_mult_diff)
+
         if bst == 'open':  # Default state: Open == not a cap-sense press
             pfp(bcya, "BST: OPEN", rst);
             print(f" Startdelta={startdelta:.5f} > (noiserange={noiserange:.5f} * closethresh={close_thresh} = {noiserange*close_thresh:.5f})")
             # import ipdb; ipdb.set_trace()
-
-            if startdelta > noiserange*close_thresh:
+            # if startdelta > noiserange*close_thresh:
+            if diclo:
                 st = i
                 stref = startyref
                 bst = 'closed_debounce'
@@ -209,7 +230,8 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
             print(f" (i={i}-st={st})={i-st} > debounce_samples={debounce_samples}")
             if i-st > debounce_samples:
                 print(f"  Startdelta={startdelta:.5f} > (noiserange={noiserange:.5f} * closethresh={close_thresh} = {noiserange*close_thresh:.5f})")
-                if startdelta > noiserange*close_thresh:
+                # if startdelta > noiserange*close_thresh:
+                if diclo:
                     print("  -> CLOSED");
                     bst = 'closed'
                     press_start_i = i
@@ -218,7 +240,7 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
                     max_since_press = open_tracking_value
                     print(f"{yel}Beginning press at value {max_since_press}{rst}")
                     mark_start_true(plot=plot, ms=d['millis'][i], y=starty)
-                    d['vdiv256'][i+0] = resetref
+                    # d['vdiv256'][i+0] = resetref
                 else:
                     print("  -> OPEN");
                     bst = 'open'
@@ -250,7 +272,8 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
                 print(" -> OPEN (from fail_safety_points())");
                 bst = 'open'
             #elif enddelta > noiserange*open_thresh:
-            elif isopen:
+            #elif isopen:
+            elif diopen:
                 print(" -> OPEN_DEBOUNCE");
                 bst = 'open_debounce'
                 en = i
@@ -273,7 +296,8 @@ def plot_presses(d=None, mins=None, maxs=None, avgs=None,
                                 press_start_y=press_start_y,
                                 max_since_press = max_since_press,
                                 open_drop_fraction = open_drop_fraction)
-                if isopen:
+                #if isopen:
+                if diopen:
                     print("  -> OPEN");
                     bst = 'open'
                     mark_end_true(plot=plot, ms=d['millis'][i], y=endy)
@@ -307,7 +331,7 @@ def main():
     # 71677 492 374.51 364.69 363.71 363.31 363.52
     # 71677 316 359.89 361.65 362.22 362.57 363.15
     # 71690 310 347.41 358.42 360.59 361.75 362.74
-    colnames=('millis', 'raw', 'vdiv4', 'vdiv8', 'vdiv16', 'vdiv32', 'vdiv64', 'vdiv128', 'vdiv128a')
+    # colnames=('millis', 'raw', 'vdiv4', 'vdiv8', 'vdiv16', 'vdiv32', 'vdiv64', 'vdiv128', 'vdiv128a')
     colnames=('millis', 'raw', 'vdiv8', 'vdiv16', 'vdiv32', 'vdiv64', 'vdiv128', 'vdiv128a')
     d = pd.read_csv(logfn, delim_whitespace=True,
             header=None,
@@ -358,6 +382,10 @@ def main():
     sp1.plot(x, d['vdiv128'].array, label='vdiv128', lw=.5)
     #sp1.plot(x, d['vdiv128a'].array, label='vdiv128assym', lw=1)
     sp1.plot(x, d['vdiv256'].array, label='vdiv256', lw=2)
+
+    # d['8-16'] = d['vdiv8'] - d['vdiv16'] + 400 # + d['vdiv256']
+    # sp1.plot(x, d['8-16'].array, label='8-16', lw=3)
+
     # plt.xticks(
     #         ticks=(d['millis'] - d['millis'][0]).array,
     #         labels=(d['millis']/1000).array)
@@ -383,9 +411,20 @@ def main():
     sp1.plot(x, maxs, label='max', lw=2)
     print(f"Len (mins):", len(mins))
     print(f"Len (maxs):", len(maxs))
+
+    dislow = mins[1] - mins[0]
+    diffs=[dislow]
+    for i in range(1, len(mins)):
+        di = (mins[i] - mins[i-1])
+        dislow += (di-dislow)/32
+        diffs.append(dislow)
+        # diffs.append(dislow*15+380)
+    d['diffs'] = diffs
+    sp1.plot(x, [(i*20)+360 for i in diffs], label='diffs', lw=2)
+
     ## sp1.plot(avgs, label='avg', lw=2)
     plot_presses(d=d, mins=mins, maxs=maxs, avgs=avgs, plot=sp1)
-    sp1.plot(x, d['vdiv256'].array, label='vdiv256 new', lw=4)
+    # sp1.plot(x, d['vdiv256'].array, label='vdiv256 new', lw=4)
     fig.tight_layout()
     plt.legend()
     plt.grid(True)

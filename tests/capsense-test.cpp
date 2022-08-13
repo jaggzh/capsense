@@ -1,3 +1,7 @@
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdio.h>
 
 #include <sys/types.h> // stat
@@ -10,6 +14,7 @@
 #include <string.h>    // memset()
 
 #include <capsense.h>
+#include <capproc.h>
 #include <ringbuffer/ringbuffer.h>
 #include "termsize.h"
 
@@ -93,7 +98,7 @@ int scaletx(float v, float vmin, float vmax) {
 	return (((v-vmin) / (vmax-vmin)) * (tw-1)) + 1;
 }
 
-char *rgb_str_fg(int r, int g, int b) {
+const char *rgb_str_fg(int r, int g, int b) {
 	static int i=0;
 	static char buf[COLORCODE_BUFS][20];
 	if (r>255 || g>255 || b>255) return "";
@@ -101,7 +106,7 @@ char *rgb_str_fg(int r, int g, int b) {
 	if (++i >= COLORCODE_BUFS) i=0;
 	return buf[i];
 }
-char *rgb_str_bg(int r, int g, int b) {
+const char *rgb_str_bg(int r, int g, int b) {
 	static int i=0;
 	static char buf[COLORCODE_BUFS][20];
 	if (r>255 || g>255 || b>255) return "";
@@ -117,8 +122,8 @@ void print_rgb_bg(int r, int g, int b) {
 	printf("\033[48;2;%d;%d;%dm", r, g, b);
 }
 
-void prow(cp_st *cp, char *row, char **rowfgs) {
-	static char *prior_rowfg=0;
+void prow(cp_st *cp, const char *row, const char **rowfgs) {
+	static const char *prior_rowfg=0;
 	if (cp->bst == BST_OPEN_DEBOUNCE) {
 		print_rgb_bg(0,0,50);
 	} else if (cp->bst == BST_OPEN) {
@@ -150,10 +155,10 @@ void prow(cp_st *cp, char *row, char **rowfgs) {
 	fputs("\033[;m\n", stdout);
 }
 
-void pat(cp_st *cp, int sx, float v, char ch, char *attr, char send, char clear) {
+void pat(cp_st *cp, int sx, float v, char ch, const char *attr, char send, char clear) {
 	// if clear is true, resets buffer and leaves (no printing)
 	static char row[255];
-	static char *rowfgs[255];
+	static const char *rowfgs[255];
 	static int zeroi=0;
 	sx-=1;  // switch to 0 offset
 	if (clear) {
@@ -300,5 +305,9 @@ int main(int argc, char *argv[]) {
 		pcols(cp);
 	}
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 // vim: sw=4 ts=4

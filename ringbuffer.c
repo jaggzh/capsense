@@ -7,7 +7,7 @@
 
 void ringbuffer_init(rb_st *rb, RB_IDXTYPE len) {
 	//struct *rb = malloc(sizeof struct ringbuffer_st);
-	rb->d = malloc(sizeof(RB_DTYPE) * len);
+	rb->d = (RB_DTYPE *) malloc(sizeof(RB_DTYPE) * len);
 	rb->hd=rb->tl=0;
 	rb->sz = len;
 }

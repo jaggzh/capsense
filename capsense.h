@@ -29,7 +29,8 @@
 #define COL_VDIV128_I  7
 #define COL_VDIV128a_I 8
 #define COL_VDIV256_I  9
-#define CP_COLCNT   10
+#define COL_VDIFF_I    10
+#define CP_COLCNT   11
 
 struct capsense_st {
 	CP_DTYPE cols[CP_COLCNT];
@@ -50,6 +51,7 @@ void set_cb_press(void (*cb)());
 void set_cb_release(void (*cb)());
 
 void update_smoothed_limits(cp_st *cp);
+void update_diff(cp_st *cp);
 void detect_pressevents(cp_st *cp);
 
 #ifndef _IN_CAPSENSE_PROC_C
