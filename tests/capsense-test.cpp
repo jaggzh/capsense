@@ -1,7 +1,4 @@
-#ifdef __cplusplus
-extern "C" {
-#endif
-
+#define _IN_CAPSENSE_TEST_C
 #include <stdio.h>
 
 #include <sys/types.h> // stat
@@ -28,6 +25,8 @@ extern "C" {
 #define RGB_FG(r,g,b) "\033[38;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
 #define RGB_BG(r,g,b) "\033[48;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
 
+#define OUR_COL_START (CP_COL_DATASTART+1)
+#define PLOT_ALL_DATA
 #define CPT_DEBUG_PAT 2
 #undef CPT_DEBUG_PAT
 
@@ -169,7 +168,7 @@ void pat(cp_st *cp, int sx, float v, char ch, const char *attr, char send, char 
 		prow(cp, row, rowfgs);
 	} else {
 		#ifdef CPT_DEBUG_PAT
-			printf("PAT %c at sx=%d\n", ch, sx);
+			printf("PAT %c at sx=%d (v=%.3f\n", ch, sx, v);
 		#endif
 		if (sx<0 || sx>=tw) return;
 		if (sx >= zeroi) {
@@ -197,6 +196,9 @@ void cptest_ringbuffer_set_minmax(float *minp, float *maxp, rb_st *rb) {
 		v = rb->d[i];
 		if (lmn > v) lmn = v;
 		if (lmx < v) lmx = v;
+		#ifdef CPT_DEBUG_PAT
+			printf("Ringbuffer val [%d]=%.2f\n", i, v);
+		#endif
 	}
 	if (*minp == (float)INT_MAX) *minp = lmn; 
 	else {
@@ -222,30 +224,62 @@ void pcols(cp_st *cp) {
 	/* float rmin = cp->rmin; */
 	/* float rmax = cp->rmax; */
 
-	if (!init) {
-		/* for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) pcols[i] = sxvals[i]; */
-		init = 1;
-		ringbuffer_setall(rb_raw, cp->cols[CP_COL_DATASTART]);
-	}
-	//for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++)
-	for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++)
-		ringbuffer_add(rb_raw, cp->cols[i]);
-	ringbuffer_add(rb_raw, cp->mn);
-	ringbuffer_add(rb_raw, cp->mx);
-	/* ringbuffer_print(rb_raw); */
+	#ifdef PLOT_ALL_DATA
+		if (!init) {
+			/* for (int i=OUR_COL_START; i<CP_COLCNT; i++)
+					pcols[i] = sxvals[i]; */
+			init = 1;
+			ringbuffer_setall(rb_raw, cp->cols[OUR_COL_START]);
+		}
+		for (int i=OUR_COL_START; i<CP_COLCNT-3; i++) {
+			if (i == COL_VDIFF_I) {
+				#if CPT_DEBUG_PAT
+					printf("rb add: %.2f (diff)\n", cp->cols[i]*50 + 460);
+				#endif
+				ringbuffer_add(rb_raw, cp->cols[i]*50 + 460);
+			} else {
+				#if CPT_DEBUG_PAT
+					printf("rb add: %.2f\n", cp->cols[i]);
+				#endif
+				ringbuffer_add(rb_raw, cp->cols[i]);
+			}
+		}
+		#if CPT_DEBUG_PAT
+			printf("rb add: %.2f (mn)\n", cp->mn);
+		#endif
+		ringbuffer_add(rb_raw, cp->mn);
+		#if CPT_DEBUG_PAT
+			printf("rb add: %.2f (mx)\n", cp->mx);
+		#endif
+		ringbuffer_add(rb_raw, cp->mx);
+		/* ringbuffer_print(rb_raw); */
+	#else
+		if (!init) {
+			/* for (int i=OUR_COL_START; i<CP_COLCNT; i++)
+					pcols[i] = sxvals[i]; */
+			init = 1;
+			ringbuffer_setall(rb_raw, 0);
+		}
+		ringbuffer_add(rb_raw, cp->cols[COL_VDIFF_I]);
+	#endif
 	cptest_ringbuffer_set_minmax(&rb_raw_min, &rb_raw_max, rb_raw);
 	#ifdef CPT_DEBUG_PAT
 		printf("raw_min = %f, raw_max = %f\n", rb_raw_min, rb_raw_max);
 		printf(" cp->mn = %f,  cp->mx = %f\n", cp->mn, cp->mx);
 	#endif
 
-	for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
+	#ifdef PLOT_ALL_DATA
+		int colstart=OUR_COL_START, colend=CP_COLCNT-1;
+	#else
+		int colstart=COL_VDIFF_I, colend=COL_VDIFF_I;
+	#endif
+	for (int i=colstart; i<=colend; i++) {
 		v = cp->cols[i];
 		sx = scaletx(v, rb_raw_min, rb_raw_max);
 		sxvals[i] = sx;
 		#ifdef CPT_DEBUG_PAT
 			printf("[%d] Min: %f, Max: %f, Val: %f, SX: %d, Ch:%c\n",
-				i, rb_raw_min, rb_raw_max, v, sx, !colchars[i] ? '_' : colchars[i]);
+				i, rb_raw_min, rb_raw_max, v, sx, !colchars[i] ? '.' : colchars[i]);
 		#endif
 	}
 	if (GRAPH_CLUSTER_LINES == 1 || !(idx%GRAPH_CLUSTER_LINES)) {
@@ -255,7 +289,7 @@ void pcols(cp_st *cp) {
 	//
 	pat(cp, scaletx(cp->smoothmin, rb_raw_min, rb_raw_max)-1, cp->mn, '{', RGB_FG(250,0,0), 0, 0);
 	pat(cp, scaletx(cp->smoothmax, rb_raw_min, rb_raw_max)+1, cp->mx, '}', RGB_FG(0,250,0), 0, 0);
-	for (int i=0; i<CP_COLCNT; i++) {
+	for (int i=OUR_COL_START; i<CP_COLCNT; i++) {
 		char colchar = colchars[i];
 		if (colchar) {
 			sx = sxvals[i];
@@ -305,9 +339,5 @@ int main(int argc, char *argv[]) {
 		pcols(cp);
 	}
 }
-
-#ifdef __cplusplus
-}
-#endif
 
 // vim: sw=4 ts=4

@@ -1,4 +1,4 @@
-#define _IN_CAPSENSE_PROC_C
+#define _IN_CAPSENSE_C
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 	#include <Arduino.h>
 #endif
@@ -12,6 +12,9 @@
 #include "capsense.h"
 #include "capproc.h"
 #include "tests/millis.h"
+#ifdef CAPTEST_MODE
+#include "tests/bansi.h"
+#endif
 
 #if 0 // esp32 build doesn't define ARDUINO. Bleh.
 #ifndef ARDUINO
@@ -61,16 +64,19 @@ void set_cb_release(void (*cb)()) {
 
 
 const char *colnames[CP_COLCNT] = {
-	"millis", "raw", "vdiv4", "vdiv8", "vdiv16",
-	"vdiv32", "vdiv64", "vdiv128", "vdiv128a"
+	"millis", "raw", "vdiv8", "vdiv16",
+	"vdiv32", "vdiv64", "vdiv128", "vdiv128a",
+	"vdiv256", "vdiff"
 };
-const char colchars[CP_COLCNT] = {
-	0, '*', 0, 0, '5',
-	'6', '7', '8', 'a'
+char colchars[CP_COLCNT] = {
+	0, '*', 0, 0, 0,
+	'6', '7', '8', 'a',
+	0, 'x'
 };
 const char *colfgs[CP_COLCNT] = {
 	0, "\033[38;2;128;128;128m", 0, 0, "\033[38;2;255;255;0m",
-	"\033[38;2;255;0;255m", "\033[38;2;0;127;127m", 0, "\033[38;2;0;255;255m"
+	"\033[38;2;255;0;255m", "\033[38;2;0;127;127m", 0, "\033[38;2;0;255;255m",
+	0, "\033[48;2;0;0;255m\033[38;2;255;255;255m"
 };
 int lookbehind=8;
 
@@ -116,7 +122,7 @@ void update_diff(cp_st *cp) {
 	static float priorval=0;
 	float diff = cp->smoothmin - priorval;
 	cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
-	priorval = diff;
+	priorval = cp->smoothmin;
 }
 
 void capsense_proc(cp_st *cp) {
@@ -174,12 +180,12 @@ char fail_safety_points(cp_st *cp, int i, int ms, int y,
 void trigger_press(cp_st *cp) {
 	spa("PRESS EVENT: ");
 	spal((int)_cp_cb_press);
-	/* (*_cp_cb_press)(); */
+	(*_cp_cb_press)();
 }
 void trigger_release(cp_st *cp) {
 	spa("RELEASE EVENT: ");
 	spal((int)_cp_cb_release);
-	/* (*_cp_cb_release)(); */
+	(*_cp_cb_release)();
 }
 
 char reading_is_open(float cval, float press_start_y,
@@ -191,11 +197,22 @@ char reading_is_open(float cval, float press_start_y,
 }
 
 char diff_says_closed(float diff, float noiserange, float close_mult_diff) {
+	#if CP_DEBUG > 1
+		printf("diff_closed(): diff=%.2f > (noise=%.2f * mult=%.2f)=%.2f\n",
+			diff, noiserange, close_mult_diff,
+			 noiserange * close_mult_diff);
+	#endif
+			
     if (diff > noiserange * close_mult_diff) return 1;
     return 0;
 }
-char diff_says_open(float diff, float noiserange, float close_mult_diff) {
-    if (diff < -noiserange * close_mult_diff) return 1;
+char diff_says_open(float diff, float noiserange, float open_mult_diff) {
+	#if CP_DEBUG > 1
+		printf("diff_closed(): diff=%.2f < -(noise=%.2f * mult=%.2f)=%.2f\n",
+			diff, noiserange, open_mult_diff,
+			 -noiserange * open_mult_diff);
+	#endif
+    if (diff < -noiserange * open_mult_diff) return 1;
     return 0;
 }
 
@@ -213,8 +230,8 @@ void detect_pressevents(cp_st *cp) {
 	float noiserange = smoothmax - smoothmin;
 	float starty = smoothmin;
 	CP_DTYPE *cols = cp->cols;
-	/* float startyref = cols[COL_VDIV128_I]; */
-	/* float startdelta = starty - startyref; */
+	float startyref = cols[COL_VDIV128_I];
+	float startdelta = starty - startyref;
 	float endy = smoothmin;
 	float endyref = cols[COL_VDIV128_I];
 	float enddelta = endyref - endy;
@@ -224,10 +241,10 @@ void detect_pressevents(cp_st *cp) {
 	unsigned long ms = cols[COL_MS_I];
 	float open_tracking_value = cols[COL_VDIV64_I];
 	/* float open_drop_fraction = .7; */
-	/* float close_thresh = .8; */
+	float close_thresh = .8;
 	float open_thresh = .5;
-	float close_mult_diff = .01; //  Adapt differential to size of noise-level
-	/* float open_mult_diff = .01; */
+	float close_mult_diff = .03; // Fraction of noise for differential comparison
+	float open_mult_diff = .02;
 	float diff = cp->cols[COL_VDIFF_I];
 	char diclo=0, diopen=1;
 
@@ -262,7 +279,7 @@ void detect_pressevents(cp_st *cp) {
 	#endif
 
 	diclo = diff_says_closed(diff, noiserange, close_mult_diff);
-	diopen = diff_says_open(diff, noiserange, close_mult_diff);
+	diopen = diff_says_open(diff, noiserange, open_mult_diff);
 
 	if (cp->bst == BST_OPEN) { // Default state: Open == not a cap-sense press
 		#if CP_DEBUG > 1
@@ -403,8 +420,8 @@ void capsense_procstr(cp_st *cp, char *buf) {
 			if (sp[0] == 0) break;
 		}
 	}
-	if (i != CP_COLCNT) {
-		fprintf(stderr, "Invalid data in line %lu\n", lineno);
+	if (i != DATA_FILE_COLS) {
+		fprintf(stderr, "Invalid data in line %lu (cols = %d, expected %d)\n", lineno, i, CP_COLCNT);
 		exit(1);
 	} else {
 		capsense_proc(cp);

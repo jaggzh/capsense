@@ -19,22 +19,22 @@ package bansi;
 #include <stdio.h>
 
 // BG
-char *bgbla=BGBLA; char *bgred=BGRED; char *bggre=BGGRE;
-char *bgbro=BGBRO; char *bgblu=BGBLU; char *bgmag=BGMAG;
-char *bgcya=BGCYA; char *bggra=BGGRA;
+const char *bgbla=BGBLA; const char *bgred=BGRED; const char *bggre=BGGRE;
+const char *bgbro=BGBRO; const char *bgblu=BGBLU; const char *bgmag=BGMAG;
+const char *bgcya=BGCYA; const char *bggra=BGGRA;
 // FG
-char *bla=BLA; char *red=RED; char *gre=GRE;
-char *bro=BRO; char *blu=BLU; char *mag=MAG;
-char *cya=CYA; char *gra=GRA;
+const char *bla=BLA; const char *red=RED; const char *gre=GRE;
+const char *bro=BRO; const char *blu=BLU; const char *mag=MAG;
+const char *cya=CYA; const char *gra=GRA;
 // Bright FG (FG with intensity)
-char *bbla=BBLA; char *bred=BRED; char *bgre=BGRE;
-char *yel=YEL; char *bblu=BBLU; char *bmag=BMAG;
-char *bcya=BCYA; char *whi=WHI;
+const char *bbla=BBLA; const char *bred=BRED; const char *bgre=BGRE;
+const char *yel=YEL; const char *bblu=BBLU; const char *bmag=BMAG;
+const char *bcya=BCYA; const char *whi=WHI;
 // Other...
-char *rst=RST; char *inv=INV;
-char *cll=CLL; char *cllr=CLLR;
-char *cls=CLS; char *clsb=CLSB;
-char *ahome=AHOME;
+const char *rst=RST; const char *inv=INV;
+const char *cll=CLL; const char *cllr=CLLR;
+const char *cls=CLS; const char *clsb=CLSB;
+const char *ahome=AHOME;
 
 void uncolor() {
 	bgbla=bgred=bggre="";
@@ -66,7 +66,7 @@ char *rotbufi(void) {    // number-buffers only (6 digit max. no protection!)
 
 #if 0 // wip
 // 0-5 color components for 256 color mode
-char *fg_rgb5(float r, float g, float b) {
+const char *fg_rgb5(float r, float g, float b) {
 	/* warn "0-5 float value high " . join(',',@_) if ($_[0]>5 || $_[1]>5 || $_[2]>5); */
 	/* 	# If they give us a negative number it's their fault... */
 	char *s = rotbuffull();
@@ -78,17 +78,17 @@ char *fg_rgb5(float r, float g, float b) {
 	s[sizeof(pfx)+rgb5len]=0;
 	return s;
 }
-char *bg_rgb5(float r, float g, float b) {
+const char *bg_rgb5(float r, float g, float b) {
 	warn "0-5 float value high " . join(',',@_) if ($_[0]>5 || $_[1]>5 || $_[2]>5);
 		// # If they give us a negative number it's their fault...
 	"\033[48;5;" . rgb5val(@_) . "m";
 }
-char *fg_rgb5fl(float r, float g, float b) {
+const char *fg_rgb5fl(float r, float g, float b) {
 	warn "RGB float value high " . join(',',@_) if ($_[0]>1 || $_[1]>1 || $_[2]>1);
 		// # If they give us a negative number it's their fault...
 	"\033[38;5;" . rgb5val(   map { int($_*5) } @_   ) . "m";
 }
-char *bg_rgb5fl(float r, float g, float b) {
+const char *bg_rgb5fl(float r, float g, float b) {
 	warn "RGB float value high " . join(',',@_) if ($_[0]>1 || $_[1]>1 || $_[2]>1);
 		// # If they give us a negative number it's their fault...
 	"\033[48;5;" . rgb5val(   map { int($_*5) } @_   ) . "m";
@@ -126,7 +126,7 @@ sub gray_5_23_val {
 }
 #endif
 
-char *gotoxys(int x, int y) {
+const char *gotoxys(int x, int y) {
 	char *s = rotbuffull();
 	sprintf(s, "\033[%d;%dH", y, x);
 	return s;

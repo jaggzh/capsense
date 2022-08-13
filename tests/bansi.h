@@ -130,7 +130,7 @@ sub gray_5_23_val {
 }
 #endif
 
-char *gotoxys(int x, int y);
+const char *gotoxys(int x, int y);
 void gotoxy(int x, int y);
 
 #if 0 // wip

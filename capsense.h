@@ -1,11 +1,11 @@
-#ifndef _CAPSENSE_PROC_H
-#define _CAPSENSE_PROC_H
+#ifndef _CAPSENSE_H
+#define _CAPSENSE_H
 
 #include "ringbuffer.h"
 #include "capproc.h"
 
 #define CP_DEBUG 0
-/* #define CP_DEBUG 1 */
+/* #define CP_DEBUG 2 */
 
 #define CP_DTYPE float
 #define BST_UNKNOWN         0  // button states
@@ -32,6 +32,14 @@
 #define COL_VDIFF_I    10
 #define CP_COLCNT   11
 
+// Column count in the data log files
+// You might need to adjust this depending on how much you're storing there
+// For instance, at the time of this generating the /256 (COL_VDIV256_I) column
+//  from the raw value, not reading it from the file.
+// Also, the 128 values are in the file, but I'm re-creating them anyway
+//  (because I left that code there)
+#define DATA_FILE_COLS 8
+
 struct capsense_st {
 	CP_DTYPE cols[CP_COLCNT];
 	struct ringbuffer_st rb_range_real;
@@ -54,11 +62,15 @@ void update_smoothed_limits(cp_st *cp);
 void update_diff(cp_st *cp);
 void detect_pressevents(cp_st *cp);
 
-#ifndef _IN_CAPSENSE_PROC_C
+// The below is included always in case
+#ifndef _IN_CAPSENSE_C
+	/* #ifdef _IN_CAPSENSE_TEST_C */
+	/* 	#warning In cap we r externing colchars fine */
+	/* #endif */
 	extern char colchars[CP_COLCNT];
 	extern char *colnames[CP_COLCNT];
 	extern char *colfgs[CP_COLCNT];
-#endif // /_IN_CAPSENSE_PROC_C
+#endif // /_IN_CAPSENSE_C
 
-#endif // /_CAPSENSE_PROC_H
 
+#endif // /_CAPSENSE_H

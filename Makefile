@@ -13,21 +13,30 @@ capsense_test_debug: tests/capsense-test
 	gdb --args tests/capsense-test "${CPLOG}"
 
 
-tests/capsense-test: tests/capsense-test.cpp capsense.cpp capsense.h \
-	../ringbuffer/ringbuffer.c tests/millis.c tests/termsize.c
-	g++ -ggdb3 -I. -I.. \
+tests/capsense-test: tests/capsense-test.cpp \
+		capsense.cpp capsense.h \
+		capproc.cpp capproc.h \
+		ringbuffer.c \
+		tests/millis.c \
+		tests/bansi.c \
+		tests/termsize.c
+	g++ -ggdb3 -fPIC -I. -I.. \
+		-DCAPTEST_MODE \
 		-I${HOME}/Arduino/libraries/PrintHero/src \
 		-L${HOME}/Arduino/libraries/PrintHero/src \
 		-I${HOME}/Arduino/libraries/MagicSerialDechunk/src \
 		-L${HOME}/Arduino/libraries/MagicSerialDechunk/src \
-		-Wall -o tests/capsense-test \
-		tests/capsense-test.cpp \
+		-Wall \
+		-o tests/capsense-test \
 		capsense.cpp \
 		capproc.cpp \
 		ringbuffer.c \
 		ringbuffer.h \
+		tests/bansi.c \
 		tests/millis.c \
-		tests/termsize.c
+		tests/termsize.c \
+		${HOME}/Arduino/libraries/MagicSerialDechunk/src/MagicSerialDechunk.cpp \
+		tests/capsense-test.cpp
 
 tags: unfulfilled
 	ctags $$(find . -name '*.[ch]' -type f)
@@ -39,7 +48,6 @@ vi:
 		capsense.cpp \
 		capsense.h \
 		capproc.cpp \
-		sense-presses.py \
 		capproc.h \
 		tests/bansi.c \
 		tests/bansi.h \
