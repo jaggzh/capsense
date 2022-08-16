@@ -15,7 +15,6 @@ capsense_test_debug: tests/capsense-test
 
 tests/capsense-test: tests/capsense-test.cpp \
 		capsense.cpp capsense.h \
-		capproc.cpp capproc.h \
 		ringbuffer.c \
 		tests/millis.c \
 		tests/bansi.c \
@@ -29,7 +28,6 @@ tests/capsense-test: tests/capsense-test.cpp \
 		-Wall \
 		-o tests/capsense-test \
 		capsense.cpp \
-		capproc.cpp \
 		ringbuffer.c \
 		ringbuffer.h \
 		tests/bansi.c \
@@ -47,8 +45,6 @@ vi:
 		tests/capsense-test.cpp \
 		capsense.cpp \
 		capsense.h \
-		capproc.cpp \
-		capproc.h \
 		tests/bansi.c \
 		tests/bansi.h \
 		ringbuffer.c \

@@ -48,19 +48,55 @@ struct capsense_st {
 	float smoothmin, smoothmax; // recent min and max (from buffered)
 	char init;
 	int bst;
+	float sensitivity;
 };
 typedef struct capsense_st cp_st;
 
+#define CAP_DUMP_DATA
+//#define CAPPROC_SERIAL_DEBUG // define if you want serial debug output
+//#define CAPPROC_SERIAL_INIT  // define if you want serial debug output and want us to init it
+/* Info:
+   AVR: A0 = Transmit to ESP <-- this is my separate sensor -- the AVR pin there
+ ESP32: UART RX: Using u2rxd as our local RX pin
+*/
+#define TXPIN 17 /* u2txd. TX. Dummy pin. We're not tx'ing */
+#define RXPIN 16 /* u2rxd. RX. */
+#define CHUNKSIZE 4  // Receiving 4 bytes at a time over serial
+#define SENSOR_BAUD 57600
+
+/* Delay for reducing sensor serial reads.
+ * seconds / ( (bits/second) / (bits/byte)) = seconds*2 / byte?
+ * I don't know what I'm doing there bit it made sense at the time,
+ * and it comes out to:
+ * (5 seconds / 6400) = .78ms delay between read attempts.
+ *
+ * The delay is based on the baud rate (ie. max transfer rate)
+ * But ultimately our cap sensor is currently sending much slower.
+ *
+ * (It's in ms, so we *1000). We multiply x5 to try more frequently to
+ * make sure we don't miss anything.
+ * (/9 is for 9 bits per byte (8n1)) */
+
+#define SENSOR_DELAY_MS ((int)((1000*5) / (SENSOR_BAUD/9)))
+
+
 void ringbuffer_minmax(cp_st *cp, RB_DTYPE mn, RB_DTYPE mx);
-void capsense_init(cp_st *cp);
+void _capsense_init(cp_st *cp);
 void capsense_proc(cp_st *cp);
 void capsense_procstr(cp_st *cp, char *buf);
 void set_cb_press(void (*cb)());
 void set_cb_release(void (*cb)());
+void set_cb_sensitivity(float newval);
 
 void update_smoothed_limits(cp_st *cp);
 void update_diff(cp_st *cp);
 void detect_pressevents(cp_st *cp);
+cp_st *cap_new();
+void cap_init();
+
+// loop_cap(): Call this for the lib to update, receiving
+// sensor data (currently from Serial2)
+void loop_cap(unsigned long now); // now: pass current millis()
 
 // The below is included always in case
 #ifndef _IN_CAPSENSE_C
@@ -70,6 +106,7 @@ void detect_pressevents(cp_st *cp);
 	extern char colchars[CP_COLCNT];
 	extern char *colnames[CP_COLCNT];
 	extern char *colfgs[CP_COLCNT];
+	extern char cp_sense_debug_data;
 #endif // /_IN_CAPSENSE_C
 
 
