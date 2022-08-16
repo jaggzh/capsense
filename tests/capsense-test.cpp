@@ -30,8 +30,7 @@
 #define CPT_DEBUG_PAT 2
 #undef CPT_DEBUG_PAT
 
-cp_st cp_real;
-cp_st *cp = &cp_real;
+cp_st *cp;
 int tw, th;
 rb_st rb_raw_real;
 rb_st *rb_raw;
@@ -332,7 +331,7 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Error opening file: %s\n", logfn);
 		exit(errno);
 	}
-	capsense_init(cp);
+	cp = capnew();
 	while (fgets(buf, CP_LINEBUFSIZE, f)) {
 		capsense_procstr(cp, buf);
 		/* printf("\033[41;1mSTATE: bst=%d\033[0m\n", cp->bst); */

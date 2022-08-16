@@ -49,6 +49,9 @@ struct capsense_st {
 	char init;
 	int bst;
 	float sensitivity;
+	void (*cb_press)(struct capsense_st *cp);
+	void (*cb_release)(struct capsense_st *cp);
+	unsigned long safety_time_start_ms; // 0 is safety not enabled right now
 };
 typedef struct capsense_st cp_st;
 
@@ -81,22 +84,21 @@ typedef struct capsense_st cp_st;
 
 
 void ringbuffer_minmax(cp_st *cp, RB_DTYPE mn, RB_DTYPE mx);
-void _capsense_init(cp_st *cp);
 void capsense_proc(cp_st *cp);
 void capsense_procstr(cp_st *cp, char *buf);
-void set_cb_press(void (*cb)());
-void set_cb_release(void (*cb)());
-void set_cb_sensitivity(float newval);
+void cp_set_cb_press(cp_st *cp, void (*cb)(cp_st *cp));
+void cp_set_cb_release(cp_st *cp, void (*cb)(cp_st *cp));
+void cp_set_sensitivity(cp_st *cp, float newval);
 
 void update_smoothed_limits(cp_st *cp);
 void update_diff(cp_st *cp);
 void detect_pressevents(cp_st *cp);
-cp_st *cap_new();
-void cap_init();
+cp_st *capnew(void);
+void _cap_init(cp_st *cp);
 
 // loop_cap(): Call this for the lib to update, receiving
 // sensor data (currently from Serial2)
-void loop_cap(unsigned long now); // now: pass current millis()
+void loop_cap(cp_st *cp, unsigned long now); // now: pass current millis()
 
 // The below is included always in case
 #ifndef _IN_CAPSENSE_C

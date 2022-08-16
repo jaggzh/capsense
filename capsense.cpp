@@ -15,12 +15,11 @@
 #include <PrintHero.h>
 #include "testdefs.h"
 #include "ringbuffer.h"
-#include "capsense.h"
-#include "capproc.h"
 #include "tests/millis.h"
 #ifdef CAPTEST_MODE
 #include "tests/bansi.h"
 #endif
+#include "capsense.h"
 
 #if 0 // esp32 build doesn't define ARDUINO. Bleh.
 #ifndef ARDUINO
@@ -47,9 +46,8 @@ int debounce_samples = 15;	// ~ 30ms
  placement.
  */
 int grip_eval_checkpoint_ms = 60;
-int grip_eval_delay_samples;	 // Set in _capsense_init()
+int grip_eval_delay_samples;	 // Set in _cap_init()
 unsigned long chaos_safety_time_ms = 1000; // datetime.timedelta(milliseconds=1000);
-unsigned long safety_time_start_ms = 0; // None
 
 int cmillis = 0;
 int press_start_i = -1;
@@ -61,23 +59,15 @@ char cp_sense_debug_data=1;
 
 struct SerialDechunk dechunk_real;
 struct SerialDechunk *dechunk = &dechunk_real;
-cp_st _capdata_real;
-cp_st *_capdata;
 
-void (*_cp_cb_press)();
-void (*_cp_cb_release)();
-
-
-
-
-void set_cb_press(void (*cb)()) {
-	_cp_cb_press = cb;
+void cp_set_cb_press(cp_st *cp, void (*cb)(struct capsense_st *cp)) {
+	cp->cb_press = cb;
 }
-void set_cb_release(void (*cb)()) {
-	_cp_cb_release = cb;
+void cp_set_cb_release(cp_st *cp, void (*cb)(struct capsense_st *cp)) {
+	cp->cb_release = cb;
 }
-void set_cb_sensitivity(float newval) {
-	cb->sensitivity = newval;
+void cp_set_sensitivity(cp_st *cp, float newval) {
+	cp->sensitivity = newval;
 }
 
 const char *colnames[CP_COLCNT] = {
@@ -96,18 +86,6 @@ const char *colfgs[CP_COLCNT] = {
 	0, "\033[48;2;0;0;255m\033[38;2;255;255;255m"
 };
 int lookbehind=8;
-
-void _capsense_init(cp_st *cp) {
-	cp->rb_range = &cp->rb_range_real;
-	ringbuffer_init(cp->rb_range, lookbehind);
-	ringbuffer_setall(cp->rb_range, 0);
-	grip_eval_delay_samples = (int)(sps * grip_eval_checkpoint_ms * .001);
-	if (!cmillis) cmillis = millis(); // Only do this once even with multiple caps!
-	cp->smoothmin = INT_MAX;
-	cp->smoothmax = -((float)INT_MAX);
-	cp->bst = BST_OPEN;
-	cp->sensitivity = 1.0;
-}
 
 void cp_ringbuffer_set_minmax(cp_st *cp) {
 	rb_st *rb = cp->rb_range;
@@ -162,17 +140,17 @@ void capsense_proc(cp_st *cp) {
 	cp_ringbuffer_set_minmax(cp);
 }
 
-void set_safety_timeout(int ms, int y, int yref) {
-	safety_time_start_ms = ms;
+void set_safety_timeout(cp_st *cp, int ms, int y, int yref) {
+	cp->safety_time_start_ms = ms;
 	/* plot.axvline(ms, color='magenta') */
 	/* if y is not None and yref is not None: */
 	/*	   plot.vlines(x=[ms], ymin=yref, ymax=y, color='blue', lw=4) */
 }
 
-void mark_safety_end(int ms) {
+void mark_safety_end(cp_st *cp, int ms) {
 	/* global safety_time_start_ms */
 	/* plot.axvline(ms, color='brown') */
-	safety_time_start_ms = 0;
+	cp->safety_time_start_ms = 0;
 }
 
 // fail_safety_points(): Return 1 if fails test (should open button)
@@ -183,7 +161,7 @@ char fail_safety_points(cp_st *cp, int i, int ms, int y,
 	return 0;
 	if (i - press_start_i > grip_eval_delay_samples) {
 		if (y > curd + noiserange*2) {
-			safety_time_start_ms = ms;
+			cp->safety_time_start_ms = ms;
 			/* mark_safety_fail(plot=plot, ms=d['millis'][i], y=y) */
 			cp->bst = BST_OPEN;
 			return 1;
@@ -196,14 +174,14 @@ char fail_safety_points(cp_st *cp, int i, int ms, int y,
 }
 
 void trigger_press(cp_st *cp) {
-	spa("PRESS EVENT: ");
-	spal((int)_cp_cb_press);
-	(*_cp_cb_press)();
+	spal("CP: PRESS EVENT");
+	/* spal((int)cp->cb_press); */
+	(*cp->cb_press)(cp);
 }
 void trigger_release(cp_st *cp) {
-	spa("RELEASE EVENT: ");
-	spal((int)_cp_cb_release);
-	(*_cp_cb_release)();
+	spal("CP: RELEASE EVENT");
+	/* spal((int)cp->cb_release); */
+	(*cp->cb_release)(cp);
 }
 
 char reading_is_open(float cval, float press_start_y,
@@ -268,27 +246,27 @@ void detect_pressevents(cp_st *cp) {
 
 	static int st=0, en=0;
 	//static int stref = 0;
-	static unsigned long sample_count=-1;
+	static unsigned long sample_count = -1;
 
 	sample_count++;
-	if (safety_time_start_ms) {
-		unsigned long dist = ms-safety_time_start_ms;
+	if (cp->safety_time_start_ms) {
+		unsigned long dist = ms-cp->safety_time_start_ms;
 		#if CP_DEBUG > 1
-			printf("Safety: %lu\n", safety_time_start_ms);
+			printf("Safety: %lu\n", cp->safety_time_start_ms);
 			printf("Millis: %lu\n", ms);
 			printf("Millis-Safety: %lu\n", dist);
 		#endif
 		if (dist > chaos_safety_time_ms) {
-				/* # mark_safety_end(plot=plot, d=d, ms=safety_time_start_ms) */
-			safety_time_start_ms = 0;
+				/* # mark_safety_end(plot=plot, d=d, ms=cp->safety_time_start_ms) */
+			cp->safety_time_start_ms = 0;
 		} else {
 			return; // we're within safety shutoff still (I think)
 		}
 	}
 
 	/* # If safety timeout was set and it's too soon, quit */
-	/* # if safety_time_start_ms is not None: */
-	/* #	 if d['millis'][i] - safety_time_start_ms < 2000: return */
+	/* # if cp->safety_time_start_ms is not None: */
+	/* #	 if d['millis'][i] - cp->safety_time_start_ms < 2000: return */
 	#if CP_DEBUG > 1
 		printf(BBLA "Cols:");
 		for (int i=1; i<CP_COLCNT; i++) printf(" %.2f", cp->cols[i]);
@@ -449,7 +427,7 @@ void capsense_procstr(cp_st *cp, char *buf) {
 	}
 }
 
-void procval(uint16_t v) {
+void procval(cp_st *cp, uint16_t v) {
 	/* static float avg_short=v; */
 	static float avg4=v;
 	static float avg8=v;
@@ -473,16 +451,16 @@ void procval(uint16_t v) {
 		avg128a += (v-avg128a)/32;
 	}
 	unsigned long now = millis();
-	_capdata->cols[COL_MS_I] = now;
-	_capdata->cols[COL_RAW_I] = v;
-	_capdata->cols[COL_VDIV4_I] = avg4;
-	_capdata->cols[COL_VDIV8_I] = avg8;
-	_capdata->cols[COL_VDIV16_I] = avg16;
-	_capdata->cols[COL_VDIV32_I] = avg32;
-	_capdata->cols[COL_VDIV64_I] = avg64;
-	_capdata->cols[COL_VDIV128_I] = avg128;
-	_capdata->cols[COL_VDIV128a_I] = avg128a;
-	_capdata->cols[COL_VDIV256_I] = avg256;
+	cp->cols[COL_MS_I] = now;
+	cp->cols[COL_RAW_I] = v;
+	cp->cols[COL_VDIV4_I] = avg4;
+	cp->cols[COL_VDIV8_I] = avg8;
+	cp->cols[COL_VDIV16_I] = avg16;
+	cp->cols[COL_VDIV32_I] = avg32;
+	cp->cols[COL_VDIV64_I] = avg64;
+	cp->cols[COL_VDIV128_I] = avg128;
+	cp->cols[COL_VDIV128a_I] = avg128a;
+	cp->cols[COL_VDIV256_I] = avg256;
 	// ^  we set COL_VDIFF_I below
 	#ifdef CAP_DUMP_DATA
 	if (cp_sense_debug_data) {
@@ -506,20 +484,20 @@ void procval(uint16_t v) {
 		DSP('\n');
 	}
 	#endif
-	capsense_proc(_capdata);
-	update_smoothed_limits(_capdata);
-	update_diff(_capdata);
-	detect_pressevents(_capdata);
+	capsense_proc(cp);
+	update_smoothed_limits(cp);
+	update_diff(cp);
+	detect_pressevents(cp);
 }
 
-void dechunk_cb(struct SerialDechunk *sp) {
+void dechunk_cb(struct SerialDechunk *sp, void *userdata) {
 	/* DSP('{'); */
 	uint16_t val;
 	for (unsigned int i=0; i<sp->chunksize; i+=2) { // +=2 for 16 bit
 		/* printf("%d ", sp->b[i]); */
 		val = sp->b[i] | sp->b[i+1]<<8;
 		/* DSPL(val); */
-		procval(val);
+		procval((cp_st *)userdata, val);
 		/* DSPL(sp->b[i]); */
 		/* DSP(' '); */
 	}
@@ -553,20 +531,32 @@ void loop_local_serial() {
 }
 #endif
 
-cp_st *cap_new() {
+cp_st *capnew(void) {
 	cp_st *cp;
-	if (!(cp = (cp_st *)malloc(sizeof cp_st))) {
+	cp = (cp_st *)calloc(1, sizeof cp_st);
+	if (!cp) {
 		spl("Error malloc() cp_st struct");
-	cap_init(cp);
+		return 0;
+	}
+	_cap_init(cp);
 	return cp;
 }
 
-void cap_init(cp_st *cp) {
+void _cap_init(cp_st *cp) {
 	#ifdef CAPPROC_SERIAL_INIT
 		Serial.begin(115200);
 	#endif
 
-	_capsense_init(cp);
+	cp->rb_range = &cp->rb_range_real;
+	ringbuffer_init(cp->rb_range, lookbehind);
+	ringbuffer_setall(cp->rb_range, 0);
+	grip_eval_delay_samples = (int)(sps * grip_eval_checkpoint_ms * .001);
+	if (!cmillis) cmillis = millis(); // Only do this once even with multiple caps!
+	cp->smoothmin = INT_MAX;
+	cp->smoothmax = -((float)INT_MAX);
+	cp->bst = BST_OPEN;
+	cp->sensitivity = 1.0;
+	cp->safety_time_start_ms = 0;
 
 	#ifdef ESP_PLATFORM
 		Serial2.begin(SENSOR_BAUD, SERIAL_8N1, RXPIN, TXPIN);
@@ -574,10 +564,17 @@ void cap_init(cp_st *cp) {
 		// #error "We have no serial device to receive data"
 	#endif
 	#warning "capproc still has a global dechunk buffer and other global values. multiple cap sensors not usable."
-	serial_dechunk_init(dechunk, CHUNKSIZE, dechunk_cb);
+	// serial_dechunk_init takes a void* for the caller's own auxiliary data.
+	// this will be passed to the callback.
+	// we're using it to keep track of the sensor so multiple sensors can be
+	// used.
+	serial_dechunk_init(dechunk, CHUNKSIZE, dechunk_cb, (void *)cp);
 }
 
-void loop_cap(unsigned long now) { // now: pass current millis()
+void loop_cap(cp_st *cp, unsigned long now) {
+	// now: pass current millis()
+	// newvalue: latest reading (because caller
+	//           might get it from somewhere themselves)
 	/* static uint8_t i=0; */
 	/* i++; */
 	/* static int wrap=0; */
