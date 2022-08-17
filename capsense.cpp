@@ -55,7 +55,7 @@ int press_start_ms = -1;
 float press_start_y = 0;
 float max_since_press = -1;
 uint16_t avg_div=4;
-char cp_sense_debug_data=1;
+char cp_sense_debug_data=0;
 
 struct SerialDechunk dechunk_real;
 struct SerialDechunk *dechunk = &dechunk_real;
@@ -192,23 +192,23 @@ char reading_is_open(float cval, float press_start_y,
     return 0;
 }
 
-char diff_says_closed(float diff, float noiserange, float close_mult_diff) {
+char diff_says_closed(cp_st *cp, float diff, float noiserange, float close_mult_diff) {
 	#if CP_DEBUG > 1
-		printf("diff_closed(): diff=%.2f > (noise=%.2f * mult=%.2f)=%.2f\n",
-			diff, noiserange, close_mult_diff,
-			 noiserange * close_mult_diff);
+		printf("diff_closed(): diff=%.2f > (noise=%.2f * mult=%.2f * sensi=%.2f)=%.2f\n",
+			diff, noiserange, close_mult_diff, sensitivity,
+			 noiserange * close_mult_diff * cp->sensitivity);
 	#endif
 			
-    if (diff > noiserange * close_mult_diff) return 1;
+    if (diff > noiserange * close_mult_diff * cp->sensitivity) return 1;
     return 0;
 }
-char diff_says_open(float diff, float noiserange, float open_mult_diff) {
+char diff_says_open(cp_st *cp, float diff, float noiserange, float open_mult_diff) {
 	#if CP_DEBUG > 1
-		printf("diff_closed(): diff=%.2f < -(noise=%.2f * mult=%.2f)=%.2f\n",
-			diff, noiserange, open_mult_diff,
-			 -noiserange * open_mult_diff);
+		printf("diff_closed(): diff=%.2f < -(noise=%.2f * mult=%.2f * sensi=%.2f)=%.2f\n",
+			diff, noiserange, open_mult_diff, sensitivity,
+			 -noiserange * open_mult_diff * cp->sensitivity);
 	#endif
-    if (diff < -noiserange * open_mult_diff) return 1;
+    if (diff < -noiserange * open_mult_diff * cp->sensitivity) return 1;
     return 0;
 }
 
@@ -274,8 +274,8 @@ void detect_pressevents(cp_st *cp) {
 		printf(RST "\n");
 	#endif
 
-	diclo = diff_says_closed(diff, noiserange, close_mult_diff);
-	diopen = diff_says_open(diff, noiserange, open_mult_diff);
+	diclo = diff_says_closed(cp, diff, noiserange, close_mult_diff);
+	diopen = diff_says_open(cp, diff, noiserange, open_mult_diff);
 
 	if (cp->bst == BST_OPEN) { // Default state: Open == not a cap-sense press
 		#if CP_DEBUG > 1
@@ -533,7 +533,7 @@ void loop_local_serial() {
 
 cp_st *capnew(void) {
 	cp_st *cp;
-	cp = (cp_st *)calloc(1, sizeof cp_st);
+	cp = (cp_st *)calloc(1, sizeof(cp_st));
 	if (!cp) {
 		spl("Error malloc() cp_st struct");
 		return 0;
