@@ -37,6 +37,9 @@ int debounce_samples = 15;	// ~ 30ms
 // debounce_wait_time = debounce_samples * (1/164);
 // .0060975609s / sample
 
+float close_mult_diff = .03; // Fraction of noise for differential comparison
+float open_mult_diff = .02;
+
 /*
  Gripping/movement settings
  grip_eval_delay_ms
@@ -55,7 +58,11 @@ int press_start_ms = -1;
 float press_start_y = 0;
 float max_since_press = -1;
 uint16_t avg_div=4;
-char cp_sense_debug_data=0;
+#if CP_DEBUG_DATA > 0
+	char cp_sense_debug_data=1;
+#else
+	char cp_sense_debug_data=0;
+#endif
 
 struct SerialDechunk dechunk_real;
 struct SerialDechunk *dechunk = &dechunk_real;
@@ -174,12 +181,16 @@ char fail_safety_points(cp_st *cp, int i, int ms, int y,
 }
 
 void trigger_press(cp_st *cp) {
-	spal("CP: PRESS EVENT");
+	#if CP_DEBUG_TERM > 1
+		spal("CP: PRESS EVENT");
+	#endif
 	/* spal((int)cp->cb_press); */
 	(*cp->cb_press)(cp);
 }
 void trigger_release(cp_st *cp) {
-	spal("CP: RELEASE EVENT");
+	#if CP_DEBUG_TERM > 1
+		spal("CP: RELEASE EVENT");
+	#endif
 	/* spal((int)cp->cb_release); */
 	(*cp->cb_release)(cp);
 }
@@ -192,24 +203,58 @@ char reading_is_open(float cval, float press_start_y,
     return 0;
 }
 
+const char diff_debug_fmt_clos[]="diff_%s: diff=%7.4f > %c(noise=%.3f * mult=%2.2f * sensi=%3.3f)=%7.4f        (ctr=%4d) (%s)\n";
+const char diff_debug_fmt_open[]="diff_%s: diff=%7.4f > %c(noise=%.3f * mult=%2.2f * sensi=%3.3f)=       %7.4f (ctr=%4d) (%s)\n";
+char stg_show_closed=1;
+char stg_show_open=1;
+
 char diff_says_closed(cp_st *cp, float diff, float noiserange, float close_mult_diff) {
-	#if CP_DEBUG > 1
-		printf("diff_closed(): diff=%.2f > (noise=%.2f * mult=%.2f * sensi=%.2f)=%.2f\n",
-			diff, noiserange, close_mult_diff, sensitivity,
-			 noiserange * close_mult_diff * cp->sensitivity);
+	char rc=0;
+	static int ctr=0;
+
+    if (diff > noiserange * close_mult_diff * cp->sensitivity) ctr += 5;
+	else if (ctr>0) ctr -= 4;
+    if (ctr > 40) { rc=1; ctr -= 5; }
+
+	#if CP_DEBUG_TERM > 1 || CP_DEBUG_SERIAL > 0
+		if (stg_show_closed && !random(20)) {
+			char buf[1000];
+			sprintf(buf, diff_debug_fmt_clos,
+				"closed()", diff, ' ', noiserange, close_mult_diff, cp->sensitivity,
+				 noiserange * close_mult_diff * cp->sensitivity,
+				 ctr, rc ? "closed" : "");
+			#if CP_DEBUG_SERIAL > 0
+				sp(buf);
+			#else 
+				fputf(buf, stdout);
+			#endif
+		}
 	#endif
-			
-    if (diff > noiserange * close_mult_diff * cp->sensitivity) return 1;
-    return 0;
+    return rc;
 }
 char diff_says_open(cp_st *cp, float diff, float noiserange, float open_mult_diff) {
-	#if CP_DEBUG > 1
-		printf("diff_closed(): diff=%.2f < -(noise=%.2f * mult=%.2f * sensi=%.2f)=%.2f\n",
-			diff, noiserange, open_mult_diff, sensitivity,
-			 -noiserange * open_mult_diff * cp->sensitivity);
+	char rc=0;
+	static int ctr=0;
+
+    if (diff < -noiserange * open_mult_diff * cp->sensitivity) ctr += 5;
+	else if (ctr>0) ctr -= 4;
+    if (ctr > 40) { rc=1; ctr -= 5; }
+
+	#if CP_DEBUG_TERM > 1 || CP_DEBUG_SERIAL > 0
+		if (stg_show_open && !random(20)) {
+			char buf[1000];
+			sprintf(buf, diff_debug_fmt_open,
+				"open()  ", diff, '-', noiserange, open_mult_diff, cp->sensitivity,
+				 -noiserange * open_mult_diff * cp->sensitivity,
+				 ctr, rc ? "open" : "");
+			#if CP_DEBUG_SERIAL > 0
+				sp(buf);
+			#else 
+				fputf(buf, stdout);
+			#endif
+		}
 	#endif
-    if (diff < -noiserange * open_mult_diff * cp->sensitivity) return 1;
-    return 0;
+    return rc;
 }
 
 void detect_pressevents(cp_st *cp) {
@@ -239,8 +284,6 @@ void detect_pressevents(cp_st *cp) {
 	/* float open_drop_fraction = .7; */
 	float close_thresh = .8;
 	float open_thresh = .5;
-	float close_mult_diff = .03; // Fraction of noise for differential comparison
-	float open_mult_diff = .02;
 	float diff = cp->cols[COL_VDIFF_I];
 	char diclo=0, diopen=1;
 
@@ -251,7 +294,7 @@ void detect_pressevents(cp_st *cp) {
 	sample_count++;
 	if (cp->safety_time_start_ms) {
 		unsigned long dist = ms-cp->safety_time_start_ms;
-		#if CP_DEBUG > 1
+		#if CP_DEBUG_TERM > 1
 			printf("Safety: %lu\n", cp->safety_time_start_ms);
 			printf("Millis: %lu\n", ms);
 			printf("Millis-Safety: %lu\n", dist);
@@ -267,7 +310,7 @@ void detect_pressevents(cp_st *cp) {
 	/* # If safety timeout was set and it's too soon, quit */
 	/* # if cp->safety_time_start_ms is not None: */
 	/* #	 if d['millis'][i] - cp->safety_time_start_ms < 2000: return */
-	#if CP_DEBUG > 1
+	#if CP_DEBUG_TERM > 1
 		printf(BBLA "Cols:");
 		for (int i=1; i<CP_COLCNT; i++) printf(" %.2f", cp->cols[i]);
 		printf(WHI " [Min %.2f Max %.2f]", smoothmin, smoothmax);
@@ -277,8 +320,11 @@ void detect_pressevents(cp_st *cp) {
 	diclo = diff_says_closed(cp, diff, noiserange, close_mult_diff);
 	diopen = diff_says_open(cp, diff, noiserange, open_mult_diff);
 
+	cp->closed_set = 0;
+	cp->open_set = 0;
+
 	if (cp->bst == BST_OPEN) { // Default state: Open == not a cap-sense press
-		#if CP_DEBUG > 1
+		#if CP_DEBUG_TERM > 1
 			pf(BCYA "BST: BST_OPEN\n" RST);
 			pf(" Startdelta=%f > (noiserange=%f * closethresh=%f = %f)\n",
 				startdelta, noiserange, close_thresh, noiserange*close_thresh);
@@ -286,7 +332,7 @@ void detect_pressevents(cp_st *cp) {
 
 		/* if (startdelta > noiserange*close_thresh) { */
 		if (diclo) {
-			#if CP_DEBUG > 1
+			#if CP_DEBUG_TERM > 1
 				printf(YEL " -> CLOSED DEBOUNCE\n" RST);
 			#endif
 			st = sample_count;
@@ -295,22 +341,23 @@ void detect_pressevents(cp_st *cp) {
 			//mark_start_try(plot=plot, ms=d['millis'][i], y=starty);
 		}
 	} else if (cp->bst == BST_CLOSED_DEBOUNCE) {
-		#if CP_DEBUG > 1
+		#if CP_DEBUG_TERM > 1
 			pf(BCYA "BST: BST_CLOSED_DEBOUNCE\n" RST);
 			pf(" (sample_count=%lu-st=%d)=%lu > debounce_samples=%d\n",
 				sample_count, st, sample_count-st, debounce_samples);
 		#endif
 		if ((int)sample_count-st > debounce_samples) {
-			#if CP_DEBUG > 1
+			#if CP_DEBUG_TERM > 1
 				pf("  Startdelta=%f > (noiserange=%f * closethresh=%f = %f)\n",
 					startdelta, noiserange, close_thresh, noiserange*close_thresh);
 			#endif
 			/* if (startdelta > noiserange*close_thresh) { */
 			if (diclo) {
-				#if CP_DEBUG > 1
+				#if CP_DEBUG_TERM > 1
 					printf(YEL "  -> CLOSED\n" RST);
 				#endif
 				cp->bst = BST_CLOSED;
+				cp->closed_set = 1;
 				press_start_i = sample_count;
 				press_start_ms = ms;
 				press_start_y = cols[COL_VDIV16_I];
@@ -319,7 +366,7 @@ void detect_pressevents(cp_st *cp) {
 				//mark_start_true(plot=plot, ms=d['millis'][i], y=starty);
 				trigger_press(cp);
 			} else {
-				#if CP_DEBUG > 1
+				#if CP_DEBUG_TERM > 1
 					printf(YEL " -> OPEN\n" RST);
 				#endif
 				cp->bst = BST_OPEN;
@@ -331,7 +378,7 @@ void detect_pressevents(cp_st *cp) {
 			//   /   /  \    \ h*tolerance
 			//  h   /    \__ / ___
 			//   \ /      \    \  considered open 
-		#if CP_DEBUG > 1
+		#if CP_DEBUG_TERM > 1
 			pf(BCYA "BST: BST_CLOSED\n" RST);
 			pf(" fail_safety_points()\n");
 			pf("   future: else if (enddelta=%f > (noiserange=%f * openthresh=%f = %f)\n",
@@ -348,13 +395,13 @@ void detect_pressevents(cp_st *cp) {
 				chaosdelta, chaosy, chaosyref,
 				press_start_y)) {
 			// Tests and issues mark_safety_fail() if needed to plot
-			#if CP_DEBUG > 1
+			#if CP_DEBUG_TERM > 1
 				printf(YEL "  -> CLOSED\n" RST);
 			#endif
 			cp->bst = BST_OPEN;
 		//} else if (isopen || enddelta > noiserange*open_thresh) {
 		} else if (diopen || enddelta > noiserange*open_thresh) {
-			#if CP_DEBUG > 1
+			#if CP_DEBUG_TERM > 1
 				printf(YEL " -> OPEN_DEBOUNCE\n" RST);
 			#endif
 			en = sample_count;
@@ -362,7 +409,7 @@ void detect_pressevents(cp_st *cp) {
 			cp->bst = BST_OPEN_DEBOUNCE;
 		}
 	} else if (cp->bst == BST_OPEN_DEBOUNCE) {
-		#if CP_DEBUG > 1
+		#if CP_DEBUG_TERM > 1
 			pf(BCYA "BST: BST_OPEN_DEBOUNCE\n" RST);
 		#endif
 		if ((int)(sample_count-en) > debounce_samples) {
@@ -371,15 +418,16 @@ void detect_pressevents(cp_st *cp) {
 			// if (enddelta > noiserange*open_thresh) {
 			/* if (isopen) { */
 			if (diopen) {
-				#if CP_DEBUG > 1
+				#if CP_DEBUG_TERM > 1
 					printf(YEL " -> OPEN\n" RST);
 				#endif
+				cp->open_set = 1;
 				cp->bst = BST_OPEN;
 				/* mark_end_true(plot=plot, ms=d['millis'][i], y=endy) */
 				/* mark_pressrange(d['millis'][st], d['millis'][i], d=d, plot=plot) */
 				trigger_release(cp);
 			} else {
-				#if CP_DEBUG > 1
+				#if CP_DEBUG_TERM > 1
 					printf(YEL " -> CLOSED\n" RST);
 				#endif
 				cp->bst = BST_CLOSED;
@@ -398,13 +446,13 @@ void capsense_procstr(cp_st *cp, char *buf) {
 	lineno++;
 
 	int i=0;
-	#if CP_DEBUG > 1
+	#if CP_DEBUG_TERM > 1
 		fprintf(stderr, "In [%lu]: %s", lineno, buf);
 	#endif
 	for (; i<CP_COLCNT; i++) {
 		errno = 0;
 		cp->cols[i] = strtof(sp, &nsp);
-		#if CP_DEBUG > 1
+		#if CP_DEBUG_TERM > 1
 			fprintf(stderr, "Line %lu, col %d, value %f\n", lineno, i, cp->cols[i]);
 		#endif
 		if (cp->cols[i] == 0 && nsp==sp) { // no conversion done. error
@@ -437,6 +485,7 @@ void procval(cp_st *cp, uint16_t v) {
 	static float avg128=v;
 	static float avg128a=v; // Assymetric (drops faster)
 	static float avg256=v;
+	static float avg2048=v;
 	/* avg_short += (v-avg_short)/avg_div; */
 	avg4 += (v-avg4)/4;
 	avg8 += (v-avg8)/8;
@@ -445,6 +494,7 @@ void procval(cp_st *cp, uint16_t v) {
 	avg64 += (v-avg64)/64;
 	avg128 += (v-avg128)/128;
 	avg256 += (v-avg256)/256;
+	avg2048 += (v-avg2048)/2048;
 	if (v-avg128a > 0) {  // Assymetric avg (drops faster than rises)
 		avg128a += (v-avg128a)/128;
 	} else {
@@ -461,33 +511,61 @@ void procval(cp_st *cp, uint16_t v) {
 	cp->cols[COL_VDIV128_I] = avg128;
 	cp->cols[COL_VDIV128a_I] = avg128a;
 	cp->cols[COL_VDIV256_I] = avg256;
+	cp->cols[COL_VDIV2048_I] = avg2048;
 	// ^  we set COL_VDIFF_I below
-	#ifdef CAP_DUMP_DATA
-	if (cp_sense_debug_data) {
-		DSP(now);
-		DSP(' ');
-		DSP(v);
-		DSP(' ');
-		/* DSP(avg_short); */
-		/* DSP(' '); */
-		DSP(avg8);
-		DSP(' ');
-		DSP(avg16);
-		DSP(' ');
-		DSP(avg32);
-		DSP(' ');
-		DSP(avg64);
-		DSP(' ');
-		DSP(avg128);
-		DSP(' ');
-		DSP(avg128a); // assymetric
-		DSP('\n');
-	}
-	#endif
 	capsense_proc(cp);
 	update_smoothed_limits(cp);
 	update_diff(cp);
 	detect_pressevents(cp);
+	#ifdef CAP_DUMP_DATA
+	if (cp_sense_debug_data) {
+		/* DSP(now); */
+		/* DSP(' '); */
+		/* DSP("Raw:"); */
+		/* DSP(v); */
+		/* DSP(' '); */
+		/* DSP(avg_short); */
+		/* DSP(' '); */
+		/* DSP(avg8); */
+		/* DSP(' '); */
+		/* DSP(avg16); */
+		/* DSP(' '); */
+		DSP("32:");
+		DSP(avg32);
+		/* DSP(" Raw:"); */
+		/* DSP(v); */
+		DSP(" 64:");
+		DSP(avg64);
+		DSP(" 128:");
+		DSP(avg128);
+		/* DSP(" 128a:"); */
+		/* DSP(avg128a); // assymetric */
+		/* DSP(" 2048:"); */
+		/* DSP(avg2048); */
+		DSP(" ");
+		DSP(VDIFF_PLOT_LOC_BASE);
+		DSP(" Sens:");
+		DSP(VDIFF_PLOT_LOC_BASE + cp->sensitivity);
+		DSP(" Diff:");
+		VDIFF_PLOT_YLOC();
+		DSP(" Closed:");
+		
+		float noiserange = cp->smoothmax - cp->smoothmin;
+		/* if (diff > noiserange * close_mult_diff * cp->sensitivity) return 1; */
+		// #define VDIFF_PLOT_YLOC() (400 + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE)
+		DSP(cp->closed_set ?
+				cp->cols[COL_VDIFF_I] + noiserange * close_mult_diff * cp->sensitivity :
+				VDIFF_PLOT_YLOC());
+		/* DSP(cp->closed_set ? VDIFF_PLOT_YLOC()+5 : VDIFF_PLOT_YLOC()); */
+		DSP(" Open:");
+		DSP(cp->closed_set ?
+				cp->cols[COL_VDIFF_I] - noiserange * close_mult_diff * cp->sensitivity :
+				VDIFF_PLOT_YLOC());
+
+		/* DSP(cp->open_set ? VDIFF_PLOT_YLOC()-5 : VDIFF_PLOT_YLOC()); */
+		DSP('\n');
+	}
+	#endif
 }
 
 void dechunk_cb(struct SerialDechunk *sp, void *userdata) {

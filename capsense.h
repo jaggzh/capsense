@@ -4,8 +4,12 @@
 #include "ringbuffer.h"
 #include "capproc.h"
 
-#define CP_DEBUG 0
-/* #define CP_DEBUG 2 */
+#define CP_DEBUG_TERM 0
+/* #define CP_DEBUG_TERM 2 */
+#define CP_DEBUG_SERIAL 2
+
+#define CP_DEBUG_DATA 0  // actual data lines for plotting
+/* #define CP_DEBUG_DATA 1 */
 
 #define CP_DTYPE float
 #define BST_UNKNOWN         0  // button states
@@ -29,8 +33,14 @@
 #define COL_VDIV128_I  7
 #define COL_VDIV128a_I 8
 #define COL_VDIV256_I  9
-#define COL_VDIFF_I    10
-#define CP_COLCNT   11
+#define COL_VDIV2048_I 10
+#define COL_VDIFF_I    11
+#define CP_COLCNT   12
+
+#define VDIFF_YSCALE 15
+/* #define VDIFF_PLOT_YLOC() (cp->cols[COL_VDIV2048_I] + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE) */
+#define VDIFF_PLOT_LOC_BASE 400
+#define VDIFF_PLOT_YLOC() (VDIFF_PLOT_LOC_BASE + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE)
 
 // Column count in the data log files
 // You might need to adjust this depending on how much you're storing there
@@ -52,6 +62,8 @@ struct capsense_st {
 	void (*cb_press)(struct capsense_st *cp);
 	void (*cb_release)(struct capsense_st *cp);
 	unsigned long safety_time_start_ms; // 0 is safety not enabled right now
+	char closed_set;
+	char open_set;
 };
 typedef struct capsense_st cp_st;
 
@@ -109,6 +121,8 @@ void loop_cap(cp_st *cp, unsigned long now); // now: pass current millis()
 	extern char *colnames[CP_COLCNT];
 	extern char *colfgs[CP_COLCNT];
 	extern char cp_sense_debug_data;
+	extern char stg_show_closed;
+	extern char stg_show_open;
 #endif // /_IN_CAPSENSE_C
 
 
