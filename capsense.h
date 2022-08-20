@@ -2,14 +2,13 @@
 #define _CAPSENSE_H
 
 #include "ringbuffer.h"
-#include "capproc.h"
 
 #define CP_DEBUG_TERM 0
 /* #define CP_DEBUG_TERM 2 */
-#define CP_DEBUG_SERIAL 2
+/* #define CP_DEBUG_SERIAL 2 */
 
-#define CP_DEBUG_DATA 0  // actual data lines for plotting
-/* #define CP_DEBUG_DATA 1 */
+/* #define CP_DEBUG_DATA 0  // actual data lines for plotting */
+#define CP_DEBUG_DATA 1
 
 #define CP_DTYPE float
 #define BST_UNKNOWN         0  // button states
@@ -23,23 +22,24 @@
 // 71690 310 347.41 358.42 360.59 361.75 362.74
 #define CP_LINEBUFSIZE 1000
 #define CP_COL_DATASTART 1   // don't want to normalize/scale off the growing ms column
-#define COL_MS_I       0
-#define COL_RAW_I      1
-#define COL_VDIV4_I    2
-#define COL_VDIV8_I    3
-#define COL_VDIV16_I   4
-#define COL_VDIV32_I   5
-#define COL_VDIV64_I   6
-#define COL_VDIV128_I  7
-#define COL_VDIV128a_I 8
-#define COL_VDIV256_I  9
-#define COL_VDIV2048_I 10
-#define COL_VDIFF_I    11
-#define CP_COLCNT   12
+//#define COL_MS_I          0
+#define COL_RAW_I         0
+#define COL_VDIV4_I       1
+#define COL_VDIV8_I       2
+#define COL_VDIV16_I      3
+#define COL_VDIV32_I      4
+#define COL_VDIV64_I      5
+#define COL_VDIV128_I     6
+#define COL_VDIV128a_I    7
+#define COL_VDIV256_I     8
+#define COL_VDIVSLOWEST_I 9
+#define COL_VDIFF_I      10
+#define CP_COL_AVGSLAST 10   // don't want to normalize/scale off the growing ms column
+#define CP_COLCNT   11
 
 #define VDIFF_YSCALE 15
-/* #define VDIFF_PLOT_YLOC() (cp->cols[COL_VDIV2048_I] + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE) */
-#define VDIFF_PLOT_LOC_BASE 400
+/* #define VDIFF_PLOT_YLOC() (cp->cols[COL_VDIVSLOWEST_I] + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE) */
+#define VDIFF_PLOT_LOC_BASE (cp->cols[COL_VDIVSLOWEST_I])
 #define VDIFF_PLOT_YLOC() (VDIFF_PLOT_LOC_BASE + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE)
 
 // Column count in the data log files
@@ -48,9 +48,10 @@
 //  from the raw value, not reading it from the file.
 // Also, the 128 values are in the file, but I'm re-creating them anyway
 //  (because I left that code there)
-#define DATA_FILE_COLS 8
+// #define DATA_FILE_COLS 8 // unused now. we got rid of 3+ column data
 
 struct capsense_st {
+	unsigned long int ms;
 	CP_DTYPE cols[CP_COLCNT];
 	struct ringbuffer_st rb_range_real;
 	struct ringbuffer_st *rb_range;
@@ -68,7 +69,7 @@ struct capsense_st {
 typedef struct capsense_st cp_st;
 
 #define CAP_DUMP_DATA
-//#define CAPPROC_SERIAL_DEBUG // define if you want serial debug output
+#define CAPPROC_USER_SERIAL_CONTROLS // define if you want to accept some controls via user-serial
 //#define CAPPROC_SERIAL_INIT  // define if you want serial debug output and want us to init it
 /* Info:
    AVR: A0 = Transmit to ESP <-- this is my separate sensor -- the AVR pin there
@@ -95,22 +96,23 @@ typedef struct capsense_st cp_st;
 #define SENSOR_DELAY_MS ((int)((1000*5) / (SENSOR_BAUD/9)))
 
 
-void ringbuffer_minmax(cp_st *cp, RB_DTYPE mn, RB_DTYPE mx);
-void capsense_proc(cp_st *cp);
+void capsense_proc(cp_st *cp, unsigned long now, uint16_t v);
 void capsense_procstr(cp_st *cp, char *buf);
 void cp_set_cb_press(cp_st *cp, void (*cb)(cp_st *cp));
 void cp_set_cb_release(cp_st *cp, void (*cb)(cp_st *cp));
 void cp_set_sensitivity(cp_st *cp, float newval);
 
-void update_smoothed_limits(cp_st *cp);
-void update_diff(cp_st *cp);
-void detect_pressevents(cp_st *cp);
+void _cp_ringbuffer_set_minmax(cp_st *cp);
+
+void _update_smoothed_limits(cp_st *cp);
+void _update_diff(cp_st *cp);
+void _detect_pressevents(cp_st *cp);
 cp_st *capnew(void);
 void _cap_init(cp_st *cp);
 
-// loop_cap(): Call this for the lib to update, receiving
+// loop_cap_serial(): Call this for the lib to update, receiving
 // sensor data (currently from Serial2)
-void loop_cap(cp_st *cp, unsigned long now); // now: pass current millis()
+void loop_cap_serial(cp_st *cp, unsigned long now); // now: pass current millis()
 
 // The below is included always in case
 #ifndef _IN_CAPSENSE_C

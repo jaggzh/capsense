@@ -19,7 +19,10 @@ tests/capsense-test: tests/capsense-test.cpp \
 		tests/millis.c \
 		tests/bansi.c \
 		tests/termsize.c
-	g++ -ggdb3 -fPIC -I. -I.. \
+	g++ -ggdb3 \
+		-Werror \
+		-Wno-unused-variable \
+		-fPIC -I. -I.. \
 		-DCAPTEST_MODE \
 		-I${HOME}/Arduino/libraries/PrintHero/src \
 		-L${HOME}/Arduino/libraries/PrintHero/src \
@@ -36,9 +39,10 @@ tests/capsense-test: tests/capsense-test.cpp \
 		${HOME}/Arduino/libraries/MagicSerialDechunk/src/MagicSerialDechunk.cpp \
 		tests/capsense-test.cpp
 
-tags: unfulfilled
-	ctags $$(find . -name '*.[ch]' -type f)
-unfulfilled:
+tags: ta
+ta:
+	#ctags $$(find . -name '*.[ch]' -type f)
+	find . -regextype egrep -regex '.*\.(c|cc|h|hh|cpp)$$' | ctags -L -
 
 vi:
 	vim Makefile \

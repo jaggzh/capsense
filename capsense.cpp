@@ -78,23 +78,23 @@ void cp_set_sensitivity(cp_st *cp, float newval) {
 }
 
 const char *colnames[CP_COLCNT] = {
-	"millis", "raw", "vdiv8", "vdiv16",
+	"raw", "vdiv4", "vdiv8", "vdiv16",
 	"vdiv32", "vdiv64", "vdiv128", "vdiv128a",
-	"vdiv256", "vdiff"
+	"vdiv256", "slow", "vdiff"
 };
 char colchars[CP_COLCNT] = {
-	0, '*', 0, 0, 0,
+	0, 0, 0, 0,
 	'6', '7', '8', 'a',
-	0, 'x'
+	0, '|', 'x'
 };
 const char *colfgs[CP_COLCNT] = {
-	0, "\033[38;2;128;128;128m", 0, 0, "\033[38;2;255;255;0m",
+	"\033[38;2;128;128;128m", 0, 0, "\033[38;2;255;255;0m",
 	"\033[38;2;255;0;255m", "\033[38;2;0;127;127m", 0, "\033[38;2;0;255;255m",
-	0, "\033[48;2;0;0;255m\033[38;2;255;255;255m"
+	0, "\033[38;2;255;155;155m", "\033[48;2;0;0;255m\033[38;2;255;255;255m"
 };
 int lookbehind=8;
 
-void cp_ringbuffer_set_minmax(cp_st *cp) {
+void _cp_ringbuffer_set_minmax(cp_st *cp) {
 	rb_st *rb = cp->rb_range;
 	float lmn=(float)INT_MAX;
 	float lmx=(float)INT_MIN;
@@ -104,47 +104,9 @@ void cp_ringbuffer_set_minmax(cp_st *cp) {
 		if (lmn > v) lmn = v;
 		if (lmx < v) lmx = v;
 	}
-	cp->mn = lmn;
-	cp->mx = lmx;
+	cp->mn = lmn*0.999;
+	cp->mx = lmx*1.001;
 	// avgs.append(sum(d['raw'][st:en]) / (en-st))
-}
-
-void update_smoothed_limits(cp_st *cp) {
-	//for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
-	if (cp->smoothmin == (float)INT_MAX) cp->smoothmin = cp->mn;
-	else cp->smoothmin += (cp->mn - cp->smoothmin)/6;
-
-	if (cp->smoothmax == (float)INT_MIN) cp->smoothmax = cp->mx;
-	else cp->smoothmax += (cp->mx - cp->smoothmax)/6;
-	/* if (v < cp->smoothmin) cp->smoothmin = v; */
-	/* if (v > cp->smoothmax) cp->smoothmax = v; */
-}
-	/* printf("Min:%f Max:%f\n", smoothmin, smoothmax); */
-
-void update_diff(cp_st *cp) {
-	static float priorval=0;
-	float diff = cp->smoothmin - priorval;
-	cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
-	priorval = cp->smoothmin;
-}
-
-void capsense_proc(cp_st *cp) {
-	/* # Make our own dividing moving average */
-	/* def add_moving_div(d=None, div=None, label=None): */
-	/*	   a = [d['raw'][0]] # first val */
-	/*	   for i in range(1, len(d)): */
-	/*		   newv = a[i-1] + (d['raw'][i] - a[i-1])/div */
-	/*		   a.append(newv) */
-	/*	   d[label]=a */
-	/* add_moving_div(d=d, div=256, label='vdiv256') */
-
-	if (!cp->init) {	  // first call we init on data, to suppress jumping vals
-		ringbuffer_setall(cp->rb_range, cp->cols[COL_VDIV16_I]);
-		cp->init=1;
-		cp->cols[COL_VDIFF_I] = 0;
-	}
-	ringbuffer_add(cp->rb_range, cp->cols[COL_VDIV16_I]); // Used for moving min/max
-	cp_ringbuffer_set_minmax(cp);
 }
 
 void set_safety_timeout(cp_st *cp, int ms, int y, int yref) {
@@ -185,14 +147,14 @@ void trigger_press(cp_st *cp) {
 		spal("CP: PRESS EVENT");
 	#endif
 	/* spal((int)cp->cb_press); */
-	(*cp->cb_press)(cp);
+	if (cp->cb_press) (*cp->cb_press)(cp);
 }
 void trigger_release(cp_st *cp) {
 	#if CP_DEBUG_TERM > 1
 		spal("CP: RELEASE EVENT");
 	#endif
 	/* spal((int)cp->cb_release); */
-	(*cp->cb_release)(cp);
+	if (cp->cb_release) (*cp->cb_release)(cp);
 }
 
 char reading_is_open(float cval, float press_start_y,
@@ -203,61 +165,77 @@ char reading_is_open(float cval, float press_start_y,
     return 0;
 }
 
-const char diff_debug_fmt_clos[]="diff_%s: diff=%7.4f > %c(noise=%.3f * mult=%2.2f * sensi=%3.3f)=%7.4f        (ctr=%4d) (%s)\n";
-const char diff_debug_fmt_open[]="diff_%s: diff=%7.4f > %c(noise=%.3f * mult=%2.2f * sensi=%3.3f)=       %7.4f (ctr=%4d) (%s)\n";
+const char diff_debug_fmt[]="diff%s: diff=%7.4f > %c(noise=%6.3f * mult=%2.2f * sensi=%3.3f)=%s%7.4f%s (clo=%4d ope=%4d)\n";
 char stg_show_closed=1;
 char stg_show_open=1;
 
-char diff_says_closed(cp_st *cp, float diff, float noiserange, float close_mult_diff) {
-	char rc=0;
-	static int ctr=0;
 
-    if (diff > noiserange * close_mult_diff * cp->sensitivity) ctr += 5;
-	else if (ctr>0) ctr -= 4;
-    if (ctr > 40) { rc=1; ctr -= 5; }
+#define DIFF_RES_OPEN   -1
+#define DIFF_RES_CLOSED  1
+#define DIFF_RES_NOTHING 0
+
+char diff_results_in(cp_st *cp, float diff, float noiserange, float close_mult_diff) {
+	// returns 1 if closed. 0 for nothing noticable. -1 for open
+	signed char rc=DIFF_RES_NOTHING;
+	static int ctr_closed=0;
+	static int ctr_open=0;
+	static long int lmillis=0;
+	long int now=millis();
+	const int debug_output_ms = 50; // time between
+
+	float thresh = noiserange * close_mult_diff * cp->sensitivity;
+
+    if (diff > thresh) ctr_closed += 5;
+	else if (ctr_closed>0) ctr_closed -= 4;
+
+    if (diff < -thresh*.75) ctr_open += 5;
+	else if (ctr_open>0) ctr_open -= 4;
+
+    if (ctr_open > 40)   { rc=DIFF_RES_OPEN;   ctr_open -= 5;   }
+    if (ctr_closed > 40) { rc=DIFF_RES_CLOSED; ctr_closed -= 5; }
 
 	#if CP_DEBUG_TERM > 1 || CP_DEBUG_SERIAL > 0
-		if (stg_show_closed && !random(20)) {
+		if (  (1 || rc) &&
+			  (stg_show_closed || stg_show_open) &&
+			  (int)(now-lmillis) > debug_output_ms) {
+			lmillis = millis();
 			char buf[1000];
-			sprintf(buf, diff_debug_fmt_clos,
-				"closed()", diff, ' ', noiserange, close_mult_diff, cp->sensitivity,
-				 noiserange * close_mult_diff * cp->sensitivity,
-				 ctr, rc ? "closed" : "");
-			#if CP_DEBUG_SERIAL > 0
-				sp(buf);
-			#else 
-				fputf(buf, stdout);
-			#endif
+			const char *statemsg, *statespacer1, *statespacer2;
+			if (rc==DIFF_RES_CLOSED) {
+				statemsg="{CLOSED}";
+				statespacer1="";
+				statespacer2="       ";
+			} else if (rc==DIFF_RES_OPEN) {
+				statemsg="{OPEN}  ";
+				statespacer1="       ";
+				statespacer2="";
+			} else {
+				statemsg="--------";
+				statespacer1 = "-------";
+				statespacer2 = "";
+			}
+			if (1 ||
+				  (rc == DIFF_RES_CLOSED && stg_show_closed) || 
+			      (rc == DIFF_RES_OPEN   && stg_show_open)) {
+				sprintf(buf, diff_debug_fmt,
+					statemsg,
+					diff, ' ', noiserange, close_mult_diff, cp->sensitivity,
+					statespacer1,
+					noiserange * close_mult_diff * cp->sensitivity,
+					statespacer2,
+					ctr_closed, ctr_open);
+				#if CP_DEBUG_SERIAL > 0
+					sp(buf);
+				#else 
+					fputf(buf, stdout);
+				#endif
+			}
 		}
 	#endif
     return rc;
 }
-char diff_says_open(cp_st *cp, float diff, float noiserange, float open_mult_diff) {
-	char rc=0;
-	static int ctr=0;
 
-    if (diff < -noiserange * open_mult_diff * cp->sensitivity) ctr += 5;
-	else if (ctr>0) ctr -= 4;
-    if (ctr > 40) { rc=1; ctr -= 5; }
-
-	#if CP_DEBUG_TERM > 1 || CP_DEBUG_SERIAL > 0
-		if (stg_show_open && !random(20)) {
-			char buf[1000];
-			sprintf(buf, diff_debug_fmt_open,
-				"open()  ", diff, '-', noiserange, open_mult_diff, cp->sensitivity,
-				 -noiserange * open_mult_diff * cp->sensitivity,
-				 ctr, rc ? "open" : "");
-			#if CP_DEBUG_SERIAL > 0
-				sp(buf);
-			#else 
-				fputf(buf, stdout);
-			#endif
-		}
-	#endif
-    return rc;
-}
-
-void detect_pressevents(cp_st *cp) {
+void _detect_pressevents(cp_st *cp) {
 	/* global press_start_i */
 	/* global press_start_ms */
 	/* global safety_time_start_ms */
@@ -279,13 +257,13 @@ void detect_pressevents(cp_st *cp) {
 	float chaosy = smoothmin;
 	float chaosyref = cols[COL_VDIV32_I];
 	float chaosdelta = chaosy - chaosyref;
-	unsigned long ms = cols[COL_MS_I];
+	unsigned long ms = cp->ms;
 	float open_tracking_value = cols[COL_VDIV64_I];
 	/* float open_drop_fraction = .7; */
 	float close_thresh = .8;
 	float open_thresh = .5;
 	float diff = cp->cols[COL_VDIFF_I];
-	char diclo=0, diopen=1;
+	char diff_result;
 
 	static int st=0, en=0;
 	//static int stref = 0;
@@ -293,7 +271,7 @@ void detect_pressevents(cp_st *cp) {
 
 	sample_count++;
 	if (cp->safety_time_start_ms) {
-		unsigned long dist = ms-cp->safety_time_start_ms;
+		unsigned long dist = ms - cp->safety_time_start_ms;
 		#if CP_DEBUG_TERM > 1
 			printf("Safety: %lu\n", cp->safety_time_start_ms);
 			printf("Millis: %lu\n", ms);
@@ -317,8 +295,7 @@ void detect_pressevents(cp_st *cp) {
 		printf(RST "\n");
 	#endif
 
-	diclo = diff_says_closed(cp, diff, noiserange, close_mult_diff);
-	diopen = diff_says_open(cp, diff, noiserange, open_mult_diff);
+	diff_result = diff_results_in(cp, diff, noiserange, close_mult_diff);
 
 	cp->closed_set = 0;
 	cp->open_set = 0;
@@ -331,7 +308,7 @@ void detect_pressevents(cp_st *cp) {
 		#endif
 
 		/* if (startdelta > noiserange*close_thresh) { */
-		if (diclo) {
+		if (diff_result == DIFF_RES_CLOSED) {
 			#if CP_DEBUG_TERM > 1
 				printf(YEL " -> CLOSED DEBOUNCE\n" RST);
 			#endif
@@ -352,7 +329,7 @@ void detect_pressevents(cp_st *cp) {
 					startdelta, noiserange, close_thresh, noiserange*close_thresh);
 			#endif
 			/* if (startdelta > noiserange*close_thresh) { */
-			if (diclo) {
+			if (diff_result == DIFF_RES_CLOSED) {
 				#if CP_DEBUG_TERM > 1
 					printf(YEL "  -> CLOSED\n" RST);
 				#endif
@@ -400,7 +377,7 @@ void detect_pressevents(cp_st *cp) {
 			#endif
 			cp->bst = BST_OPEN;
 		//} else if (isopen || enddelta > noiserange*open_thresh) {
-		} else if (diopen || enddelta > noiserange*open_thresh) {
+		} else if (diff_result == DIFF_RES_CLOSED  || enddelta > noiserange*open_thresh) {
 			#if CP_DEBUG_TERM > 1
 				printf(YEL " -> OPEN_DEBOUNCE\n" RST);
 			#endif
@@ -417,7 +394,7 @@ void detect_pressevents(cp_st *cp) {
 			/* 			max_since_press, open_drop_fraction); */
 			// if (enddelta > noiserange*open_thresh) {
 			/* if (isopen) { */
-			if (diopen) {
+			if (diff_result == DIFF_RES_CLOSED) {
 				#if CP_DEBUG_TERM > 1
 					printf(YEL " -> OPEN\n" RST);
 				#endif
@@ -440,8 +417,8 @@ void detect_pressevents(cp_st *cp) {
 
 void capsense_procstr(cp_st *cp, char *buf) {
 	static unsigned long lineno = 0;
-	char *sp = buf;
-	char *nsp;
+	char *bufp = buf;
+	char *nbufp;
 
 	lineno++;
 
@@ -449,80 +426,41 @@ void capsense_procstr(cp_st *cp, char *buf) {
 	#if CP_DEBUG_TERM > 1
 		fprintf(stderr, "In [%lu]: %s", lineno, buf);
 	#endif
-	for (; i<CP_COLCNT; i++) {
-		errno = 0;
-		cp->cols[i] = strtof(sp, &nsp);
-		#if CP_DEBUG_TERM > 1
-			fprintf(stderr, "Line %lu, col %d, value %f\n", lineno, i, cp->cols[i]);
-		#endif
-		if (cp->cols[i] == 0 && nsp==sp) { // no conversion done. error
-			break;
-		} else if (errno == ERANGE) {
-			break;
-		} else {
-			sp = nsp;
-			if (sp[0] == 0) break;
-		}
-	}
-	if (i != DATA_FILE_COLS) {
-		fprintf(stderr, "Invalid data in line %lu (cols = %d, expected %d)\n", lineno, i, CP_COLCNT);
-		exit(1);
+	// for (; i<CP_COLCNT; i++)
+		// 273179 275
+		// 273192 501
+		// 273192 497
+	// We switched to only taking "{ms} {value}".
+	// This loop used to take a bunch of pre-computed moving averages
+	errno = 0;
+	cp->ms = strtol(bufp, &nbufp, 10);
+	if (errno == ERANGE) {
 	} else {
-		capsense_proc(cp);
-		update_smoothed_limits(cp);
-		update_diff(cp);
-		detect_pressevents(cp);
+		bufp = nbufp;
+		cp->cols[COL_RAW_I] = strtof(bufp, NULL);
 	}
+	if (errno == ERANGE) {
+		#if CP_DEBUG_TERM > 1
+			fprintf(stderr, "Error in line %lu, col %d, value %f\n", lineno, i, cp->cols[i]);
+		#elif CP_DEBUG_SERIAL > 0
+			DSP(F("Error in serial data: "));
+			DSPL(buf);
+		#endif
+		return;
+	}
+	capsense_proc(cp, cp->ms, cp->cols[COL_RAW_I]);
 }
 
-void procval(cp_st *cp, uint16_t v) {
-	/* static float avg_short=v; */
-	static float avg4=v;
-	static float avg8=v;
-	static float avg16=v;
-	static float avg32=v;
-	static float avg64=v;
-	static float avg128=v;
-	static float avg128a=v; // Assymetric (drops faster)
-	static float avg256=v;
-	static float avg2048=v;
-	/* avg_short += (v-avg_short)/avg_div; */
-	avg4 += (v-avg4)/4;
-	avg8 += (v-avg8)/8;
-	avg16 += (v-avg16)/16;
-	avg32 += (v-avg32)/32;
-	avg64 += (v-avg64)/64;
-	avg128 += (v-avg128)/128;
-	avg256 += (v-avg256)/256;
-	avg2048 += (v-avg2048)/2048;
-	if (v-avg128a > 0) {  // Assymetric avg (drops faster than rises)
-		avg128a += (v-avg128a)/128;
-	} else {
-		avg128a += (v-avg128a)/32;
-	}
-	unsigned long now = millis();
-	cp->cols[COL_MS_I] = now;
-	cp->cols[COL_RAW_I] = v;
-	cp->cols[COL_VDIV4_I] = avg4;
-	cp->cols[COL_VDIV8_I] = avg8;
-	cp->cols[COL_VDIV16_I] = avg16;
-	cp->cols[COL_VDIV32_I] = avg32;
-	cp->cols[COL_VDIV64_I] = avg64;
-	cp->cols[COL_VDIV128_I] = avg128;
-	cp->cols[COL_VDIV128a_I] = avg128a;
-	cp->cols[COL_VDIV256_I] = avg256;
-	cp->cols[COL_VDIV2048_I] = avg2048;
-	// ^  we set COL_VDIFF_I below
-	capsense_proc(cp);
-	update_smoothed_limits(cp);
-	update_diff(cp);
-	detect_pressevents(cp);
+void _capsense_print_data(cp_st *cp) {
 	#ifdef CAP_DUMP_DATA
-	if (cp_sense_debug_data) {
-		/* DSP(now); */
-		/* DSP(' '); */
+	static int slowctr=0;
+	if (slowctr++ > 4) slowctr=0;
+	slowctr=0;
+	if (cp_sense_debug_data && !slowctr) {
+		DSP(cp->ms);
+		DSP(' ');
 		/* DSP("Raw:"); */
-		/* DSP(v); */
+		DSP(cp->cols[COL_RAW_I]);
 		/* DSP(' '); */
 		/* DSP(avg_short); */
 		/* DSP(' '); */
@@ -530,84 +468,104 @@ void procval(cp_st *cp, uint16_t v) {
 		/* DSP(' '); */
 		/* DSP(avg16); */
 		/* DSP(' '); */
-		DSP("32:");
-		DSP(avg32);
+		/* DSP("32:");        // keep */
+		/* DSP(avg32);        // keep */
 		/* DSP(" Raw:"); */
 		/* DSP(v); */
-		DSP(" 64:");
-		DSP(avg64);
-		DSP(" 128:");
-		DSP(avg128);
+		/* DSP(" 64:"); */
+		/* DSP(avg64); */
+		/* DSP(" 128:"); */
+		/* DSP(avg128); */
 		/* DSP(" 128a:"); */
 		/* DSP(avg128a); // assymetric */
-		/* DSP(" 2048:"); */
-		/* DSP(avg2048); */
-		DSP(" ");
-		DSP(VDIFF_PLOT_LOC_BASE);
-		DSP(" Sens:");
-		DSP(VDIFF_PLOT_LOC_BASE + cp->sensitivity);
-		DSP(" Diff:");
-		VDIFF_PLOT_YLOC();
-		DSP(" Closed:");
-		
-		float noiserange = cp->smoothmax - cp->smoothmin;
-		/* if (diff > noiserange * close_mult_diff * cp->sensitivity) return 1; */
-		// #define VDIFF_PLOT_YLOC() (400 + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE)
-		DSP(cp->closed_set ?
-				cp->cols[COL_VDIFF_I] + noiserange * close_mult_diff * cp->sensitivity :
-				VDIFF_PLOT_YLOC());
-		/* DSP(cp->closed_set ? VDIFF_PLOT_YLOC()+5 : VDIFF_PLOT_YLOC()); */
-		DSP(" Open:");
-		DSP(cp->closed_set ?
-				cp->cols[COL_VDIFF_I] - noiserange * close_mult_diff * cp->sensitivity :
-				VDIFF_PLOT_YLOC());
+		/* DSP(" slowest:"); */
+		/* DSP(avgslowest); */
+		#if 0
+			DSP(" Base:");
+			DSP(VDIFF_PLOT_LOC_BASE);
+			DSP(" Sens:");
+			DSP(VDIFF_PLOT_LOC_BASE + cp->sensitivity);
+			DSP(" Diff:");
+			DSP(VDIFF_PLOT_YLOC());
+			DSP(" Closed:");
+			
+			float noiserange = cp->smoothmax - cp->smoothmin;
+			/* if (diff > noiserange * close_mult_diff * cp->sensitivity) return 1; */
+			// #define VDIFF_PLOT_YLOC() (400 + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE)
+			DSP(cp->closed_set ?
+					(VDIFF_PLOT_LOC_BASE + cp->cols[COL_VDIFF_I] + noiserange * close_mult_diff * cp->sensitivity) :
+					VDIFF_PLOT_YLOC());
+			/* DSP(cp->closed_set ? VDIFF_PLOT_YLOC()+5 : VDIFF_PLOT_YLOC()); */
+			DSP(" Open:");
+			DSP(cp->open_set ?
+					(VDIFF_PLOT_LOC_BASE + cp->cols[COL_VDIFF_I] - noiserange * close_mult_diff * cp->sensitivity) :
+					VDIFF_PLOT_YLOC());
 
-		/* DSP(cp->open_set ? VDIFF_PLOT_YLOC()-5 : VDIFF_PLOT_YLOC()); */
+			/* DSP(cp->open_set ? VDIFF_PLOT_YLOC()-5 : VDIFF_PLOT_YLOC()); */
+		#endif
 		DSP('\n');
 	}
 	#endif
 }
 
-void dechunk_cb(struct SerialDechunk *sp, void *userdata) {
+void _gen_val_avgs(cp_st *cp, unsigned long now, uint16_t v) {
+	/* avg_short += (v-avg_short)/avg_div; */
+	cp->cols[COL_VDIV4_I]   += (v - cp->cols[COL_VDIV4_I])/4;
+	cp->cols[COL_VDIV8_I]   += (v - cp->cols[COL_VDIV8_I])/8;
+	cp->cols[COL_VDIV16_I]  += (v - cp->cols[COL_VDIV16_I])/16;
+	cp->cols[COL_VDIV32_I]  += (v - cp->cols[COL_VDIV32_I])/32;
+	cp->cols[COL_VDIV64_I]  += (v - cp->cols[COL_VDIV64_I])/64;
+	cp->cols[COL_VDIV128_I] += (v - cp->cols[COL_VDIV128_I])/128;
+	cp->cols[COL_VDIV256_I] += (v - cp->cols[COL_VDIV256_I])/256;
+	cp->cols[COL_VDIVSLOWEST_I] += (v - cp->cols[COL_VDIVSLOWEST_I])/4000;
+	if (v - cp->cols[COL_VDIV128a_I] > 0) {  // Assymetric avg (drops faster than rises)
+		cp->cols[COL_VDIV128a_I] += (v - cp->cols[COL_VDIV128a_I])/128;
+	} else {
+		cp->cols[COL_VDIV128a_I] += (v - cp->cols[COL_VDIV128a_I])/32;
+	}
+	// ^  we set COL_VDIFF_I below
+}
+
+void _dechunk_cb(struct SerialDechunk *sp, void *userdata) {
 	/* DSP('{'); */
 	uint16_t val;
 	for (unsigned int i=0; i<sp->chunksize; i+=2) { // +=2 for 16 bit
 		/* printf("%d ", sp->b[i]); */
 		val = sp->b[i] | sp->b[i+1]<<8;
 		/* DSPL(val); */
-		procval((cp_st *)userdata, val);
+		capsense_proc((cp_st *)userdata, millis(), val);
 		/* DSPL(sp->b[i]); */
 		/* DSP(' '); */
 	}
 	/* DSPL('}'); */
 }
 
-#if CAPPROC_SERIAL_DEBUG
-void loop_local_serial() {
-	uint16_t newv;
-	bool updated=false;
-	if (Serial.available()) {
-		int c = Serial.read();
-		if (c == 'h') {
-			newv = avg_div - avg_div / 2;
-			if (newv == avg_div) newv--;
-			if (newv == 0)       newv=1;
-		} else if (c == 'l') {
-			newv = avg_div + avg_div / 2;
-			if (newv == avg_div) newv++;
-			/* don't mind overflow/wrapping */
-		} else {
-			return;
+#ifdef CAPPROC_USER_SERIAL_CONTROLS
+	void loop_local_serial() {
+		uint16_t newv;
+		bool updated=false;
+		if (Serial.available()) {
+			int c = Serial.read();
+			if (c == 'h') {
+				newv = avg_div - avg_div / 2;
+				if (newv == avg_div) newv--;
+				if (newv == 0)       newv=1;
+			} else if (c == 'l') {
+				newv = avg_div + avg_div / 2;
+				if (newv == avg_div) newv++;
+				/* don't mind overflow/wrapping */
+			} else {
+				return;
+			}
+			sp("Changing avg divisor from ");
+			sp(avg_div);
+			sp(" to ");
+			spl(newv);
+			avg_div = newv;
+			delay(500); // some time to see note
 		}
-		sp("Changing avg divisor from ");
-		sp(avg_div);
-		sp(" to ");
-		spl(newv);
-		avg_div = newv;
-		delay(500); // some time to see note
 	}
-}
-#endif
+#endif // CAPPROC_USER_SERIAL_CONTROLS
 
 cp_st *capnew(void) {
 	cp_st *cp;
@@ -641,15 +599,20 @@ void _cap_init(cp_st *cp) {
 	#else
 		// #error "We have no serial device to receive data"
 	#endif
-	#warning "capproc still has a global dechunk buffer and other global values. multiple cap sensors not usable."
+	/* #warning "capproc still has a global dechunk buffer and other global values. multiple cap sensors not usable." */
 	// serial_dechunk_init takes a void* for the caller's own auxiliary data.
 	// this will be passed to the callback.
 	// we're using it to keep track of the sensor so multiple sensors can be
 	// used.
-	serial_dechunk_init(dechunk, CHUNKSIZE, dechunk_cb, (void *)cp);
+	serial_dechunk_init(dechunk, CHUNKSIZE, _dechunk_cb, (void *)cp);
 }
 
-void loop_cap(cp_st *cp, unsigned long now) {
+// Two serial processes are handled here:
+// 1. Use for capsense library to handle Serial2 reading of values
+//    which are added automatically to the MagicSerialDechunk
+//    library object which processes the data as it receives it
+// 2. User controls via Serial (see loop_local_serial())
+void loop_cap_serial(cp_st *cp, unsigned long now) {
 	// now: pass current millis()
 	// newvalue: latest reading (because caller
 	//           might get it from somewhere themselves)
@@ -657,29 +620,84 @@ void loop_cap(cp_st *cp, unsigned long now) {
 	/* i++; */
 	/* static int wrap=0; */
 	/* unsigned long now=millis(); */
-	static unsigned long last_sensor_serial_check=now;
-	#if CAPPROC_SERIAL_DEBUG
+	#ifdef CAPPROC_USER_SERIAL_CONTROLS
 		static unsigned long last_local_serial_check=now;
 		if (now - last_local_serial_check > SENSOR_DELAY_MS) {
 			last_local_serial_check = now;
 			loop_local_serial();
 		}
 	#endif
-	#ifdef ESP_PLATFORM
-	if (now - last_sensor_serial_check > SENSOR_DELAY_MS) {
-			last_sensor_serial_check = now;
-		if (Serial2.available()) {
-			uint8_t c = Serial2.read();
-			/* DSP(c); */
-			/* ++wrap; */
-			/* if (wrap == 8) DSP("  "); */
-			/* else if (wrap >= 16) { wrap=0; DSP('\n'); } */
-			/* else DSP(' '); */
-			dechunk->add(dechunk, c);
-		} else {
-			/* DSP("No ser.available()\n"); */
+	#ifndef ESP_PLATFORM
+		#warning "ESP_PLATFORM is not defined. We are NOT receiving serial data to the esp from a sensor"
+	#else
+		static unsigned long last_sensor_serial_check=now;
+		if (now - last_sensor_serial_check > SENSOR_DELAY_MS) {
+				last_sensor_serial_check = now;
+			if (Serial2.available()) {
+				uint8_t c = Serial2.read();
+				/* DSP(c); */
+				/* ++wrap; */
+				/* if (wrap == 8) DSP("  "); */
+				/* else if (wrap >= 16) { wrap=0; DSP('\n'); } */
+				/* else DSP(' '); */
+				dechunk->add(dechunk, c);
+			} else {
+				/* DSP("No ser.available()\n"); */
+			}
 		}
-	}
 	#endif
 }
 
+void _update_diff(cp_st *cp) {
+	static float priorval=0;
+	float diff = cp->cols[COL_VDIV32_I] - priorval;
+	cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
+	priorval = cp->cols[COL_VDIV32_I];
+}
+
+void capsense_proc(cp_st *cp, unsigned long now, uint16_t v) {
+	/* # Make our own dividing moving average */
+	/* def add_moving_div(d=None, div=None, label=None): */
+	/*	   a = [d['raw'][0]] # first val */
+	/*	   for i in range(1, len(d)): */
+	/*		   newv = a[i-1] + (d['raw'][i] - a[i-1])/div */
+	/*		   a.append(newv) */
+	/*	   d[label]=a */
+	/* add_moving_div(d=d, div=256, label='vdiv256') */
+
+	cp->ms = now;
+	cp->cols[COL_RAW_I] = v;
+	if (!cp->init) {	  // first call we init on data, to suppress jumping vals
+		ringbuffer_setall(cp->rb_range, v);
+		cp->cols[COL_VDIFF_I] = 0;
+		for (int i=CP_COL_DATASTART; i<=CP_COL_AVGSLAST; i++) cp->cols[i] = v;
+	} else {
+		ringbuffer_add(cp->rb_range, v); // Used for moving min/max
+	}
+	_cp_ringbuffer_set_minmax(cp);
+	/* DSP(" * "); */
+	/* DSP(ms); DSP(' '); */
+	/* DSP(v); DSP(' '); */
+
+	_gen_val_avgs(cp, now, v); // also uses cp->init
+	_update_smoothed_limits(cp);
+	_update_diff(cp);
+	_detect_pressevents(cp);
+	_capsense_print_data(cp);
+
+	if (!cp->init) {
+		cp->init=1;
+	}
+}
+
+void _update_smoothed_limits(cp_st *cp) {
+	//for (int i=CP_COL_DATASTART; i<CP_COLCNT; i++) {
+	if (cp->smoothmin == (float)INT_MAX) cp->smoothmin = cp->mn;
+	else cp->smoothmin += (cp->mn - cp->smoothmin)/6;
+
+	if (cp->smoothmax == (float)INT_MIN) cp->smoothmax = cp->mx;
+	else cp->smoothmax += (cp->mx - cp->smoothmax)/6;
+	/* if (v < cp->smoothmin) cp->smoothmin = v; */
+	/* if (v > cp->smoothmax) cp->smoothmax = v; */
+}
+	/* printf("Min:%f Max:%f\n", smoothmin, smoothmax); */

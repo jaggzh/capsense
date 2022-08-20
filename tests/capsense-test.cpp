@@ -11,7 +11,6 @@
 #include <string.h>    // memset()
 
 #include <capsense.h>
-#include <capproc.h>
 #include <ringbuffer/ringbuffer.h>
 #include "termsize.h"
 
@@ -25,10 +24,13 @@
 #define RGB_FG(r,g,b) "\033[38;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
 #define RGB_BG(r,g,b) "\033[48;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
 
+#define SCOLSMAX 400
+
 #define OUR_COL_START (CP_COL_DATASTART+1)
-#define PLOT_ALL_DATA
-#define CPT_DEBUG_PAT 2
-#undef CPT_DEBUG_PAT
+/* #define PLOT_ALL_DATA */
+/* #define CPT_DEBUG_PAT 3 */
+#define CPT_DEBUG_PAT 0
+/* #undef CPT_DEBUG_PAT */
 
 cp_st *cp;
 int tw, th;
@@ -88,6 +90,7 @@ int isfile(char *fn) {
 	struct stat sb;
 	if (stat(fn, &sb)) return 0;
 	if ((sb.st_mode & S_IFMT) == S_IFREG) return 1;
+	if ((sb.st_mode & S_IFMT) == S_IFCHR) return 1;
 	errno = ENOENT;
 	return 0;
 }
@@ -120,8 +123,15 @@ void print_rgb_bg(int r, int g, int b) {
 	printf("\033[48;2;%d;%d;%dm", r, g, b);
 }
 
-void prow(cp_st *cp, const char *row, const char **rowfgs) {
+void printback(char *str, int len) {
+	fputs(str, stdout);
+	for (; len>0; len--) putc('\b', stdout);
+}
+
+void prow(cp_st *cp, const char *row, const char **rowfgs, const float *rowvals) {
 	static const char *prior_rowfg=0;
+	char valstr[15];
+	int valstrlen;
 	if (cp->bst == BST_OPEN_DEBOUNCE) {
 		print_rgb_bg(0,0,50);
 	} else if (cp->bst == BST_OPEN) {
@@ -133,40 +143,55 @@ void prow(cp_st *cp, const char *row, const char **rowfgs) {
 	} else {
 		printf("%s[%d] ", rgb_str_bg(127,0,127), cp->bst);
 	}
-	for (int i=0; i<255; i++) {
+	/* for (int i=0; i<SCOLSMAX; i++) { */
+	for (int i=0; i<tw; i++) {
 		if (!row[i]) break;
-		#ifdef CPT_DEBUG_PAT
+		#if CPT_DEBUG_PAT > 0
 			if (row[i] != 32) printf("Row[%d] %c\n", i, row[i]);
 		#endif
-		if (!rowfgs[i]) {
-			putc(row[i], stdout);
-		} else if (!prior_rowfg) {
-			printf("%s%c", rowfgs[i], row[i]);
-		} else if (strcmp(rowfgs[i], prior_rowfg)) {
-			printf("%s%c", rowfgs[i], row[i]);
-			prior_rowfg = rowfgs[i];
+
+		valstrlen = sprintf(valstr, "%.3f", rowvals[i]);
+
+		if (row[i] == 32) {
+			fputs("\033[C", stdout);
 		} else {
-			putc(row[i], stdout);
+			if (!rowfgs[i]) {
+				putc(row[i], stdout);
+			} else if (!prior_rowfg) {
+				printf("%s%c", rowfgs[i], row[i]);
+			} else if (strcmp(rowfgs[i], prior_rowfg)) {
+				printf("%s%c", rowfgs[i], row[i]);
+				prior_rowfg = rowfgs[i];
+			} else {
+				putc(row[i], stdout);
+			}
+			fputs("\033[;m", stdout);
+			prior_rowfg = 0;
+			fputs(RGB_FG(50,50,50), stdout);
+			printback(valstr, valstrlen);
 		}
 		/* fputs(row, stdout); */
+
 	}
 	fputs("\033[;m\n", stdout);
 }
 
 void pat(cp_st *cp, int sx, float v, char ch, const char *attr, char send, char clear) {
 	// if clear is true, resets buffer and leaves (no printing)
-	static char row[255];
-	static const char *rowfgs[255];
+	static char row[SCOLSMAX];
+	static const char *rowfgs[SCOLSMAX];
+	static float rowvals[SCOLSMAX];
 	static int zeroi=0;
-	sx-=1;  // switch to 0 offset
+	sx += 1;  // switch to 0 offset
 	if (clear) {
 		zeroi=0;
-		memset(rowfgs, 0, sizeof(char *) * 255);
+		memset(rowfgs, 0, sizeof(char *) * SCOLSMAX);
+		memset(rowvals, 0, sizeof(float) * SCOLSMAX);
 		memset(row, 0, sizeof(row));
 	} else if (send) {
-		prow(cp, row, rowfgs);
+		prow(cp, row, rowfgs, rowvals);
 	} else {
-		#ifdef CPT_DEBUG_PAT
+		#if CPT_DEBUG_PAT > 0
 			printf("PAT %c at sx=%d (v=%.3f\n", ch, sx, v);
 		#endif
 		if (sx<0 || sx>=tw) return;
@@ -174,13 +199,14 @@ void pat(cp_st *cp, int sx, float v, char ch, const char *attr, char send, char 
 			for (int i=zeroi; i<sx; i++) row[i]=' ';
 			row[sx] = ch;
 			rowfgs[sx] = attr;
+			rowvals[sx] = v;
 			row[sx+1] = 0;
 			zeroi = sx+1;
 		} else {
 			row[sx] = ch;
 			rowfgs[sx] = attr;
 		}
-		#ifdef CPT_DEBUG_PAT
+		#if CPT_DEBUG_PAT > 0
 			printf("Cmax: %d\n", zeroi);
 		#endif
 		/* printf("\033[%dCV\r", x); */
@@ -195,7 +221,7 @@ void cptest_ringbuffer_set_minmax(float *minp, float *maxp, rb_st *rb) {
 		v = rb->d[i];
 		if (lmn > v) lmn = v;
 		if (lmx < v) lmx = v;
-		#ifdef CPT_DEBUG_PAT
+		#if CPT_DEBUG_PAT > 2
 			printf("Ringbuffer val [%d]=%.2f\n", i, v);
 		#endif
 	}
@@ -262,7 +288,7 @@ void pcols(cp_st *cp) {
 		ringbuffer_add(rb_raw, cp->cols[COL_VDIFF_I]);
 	#endif
 	cptest_ringbuffer_set_minmax(&rb_raw_min, &rb_raw_max, rb_raw);
-	#ifdef CPT_DEBUG_PAT
+	#if CPT_DEBUG_PAT > 0
 		printf("raw_min = %f, raw_max = %f\n", rb_raw_min, rb_raw_max);
 		printf(" cp->mn = %f,  cp->mx = %f\n", cp->mn, cp->mx);
 	#endif
@@ -276,7 +302,7 @@ void pcols(cp_st *cp) {
 		v = cp->cols[i];
 		sx = scaletx(v, rb_raw_min, rb_raw_max);
 		sxvals[i] = sx;
-		#ifdef CPT_DEBUG_PAT
+		#if CPT_DEBUG_PAT > 0
 			printf("[%d] Min: %f, Max: %f, Val: %f, SX: %d, Ch:%c\n",
 				i, rb_raw_min, rb_raw_max, v, sx, !colchars[i] ? '.' : colchars[i]);
 		#endif
