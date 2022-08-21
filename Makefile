@@ -20,7 +20,6 @@ tests/capsense-test: tests/capsense-test.cpp \
 		tests/bansi.c \
 		tests/termsize.c
 	g++ -ggdb3 \
-		-Werror \
 		-Wno-unused-variable \
 		-fPIC -I. -I.. \
 		-DCAPTEST_MODE \
@@ -32,7 +31,6 @@ tests/capsense-test: tests/capsense-test.cpp \
 		-o tests/capsense-test \
 		capsense.cpp \
 		ringbuffer.c \
-		ringbuffer.h \
 		tests/bansi.c \
 		tests/millis.c \
 		tests/termsize.c \

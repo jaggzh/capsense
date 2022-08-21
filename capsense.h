@@ -69,7 +69,7 @@ struct capsense_st {
 typedef struct capsense_st cp_st;
 
 #define CAP_DUMP_DATA
-#define CAPPROC_USER_SERIAL_CONTROLS // define if you want to accept some controls via user-serial
+/* #define CAPPROC_USER_SERIAL_CONTROLS // define if you want to accept some controls via user-serial */
 //#define CAPPROC_SERIAL_INIT  // define if you want serial debug output and want us to init it
 /* Info:
    AVR: A0 = Transmit to ESP <-- this is my separate sensor -- the AVR pin there
@@ -79,6 +79,9 @@ typedef struct capsense_st cp_st;
 #define RXPIN 16 /* u2rxd. RX. */
 #define CHUNKSIZE 4  // Receiving 4 bytes at a time over serial
 #define SENSOR_BAUD 57600
+
+#define capsense_debug_off() do {cp_sense_debug_data=0;} while (0)
+#define capsense_debug_on() do {cp_sense_debug_data=1;} while (0)
 
 /* Delay for reducing sensor serial reads.
  * seconds / ( (bits/second) / (bits/byte)) = seconds*2 / byte?
