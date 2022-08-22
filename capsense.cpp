@@ -674,14 +674,23 @@ void loop_cap_serial(cp_st *cp, unsigned long now) {
 }
 
 #define REFVAL (cp->cols[COL_VDIV32_I])
+/* #define REFVAL (cp->raw) */
 void _update_diff(cp_st *cp) {
-	printf("Val: %f\n", REFVAL);
-	float diff = REFVAL - cp->prior_basis;
+	/* printf("---------------\n"); */
+	/* printf("REFVAL: %d\n", REFVAL); */
+	/* printf("1 prior_basis: %u\n", cp->prior_basis); */
+	float diff = ((float)REFVAL) - (float)cp->prior_basis;
+	/* printf("REFVAL: %f\n", REFVAL); */
+	/* printf("1 prior_basis: %f\n", cp->prior_basis); */
+	/* printf("diff: %f\n", diff); */
 	//cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
 	cp->prior_basis = REFVAL;
 	cp->diff = diff;
 
-	if (fabsf(diff) > cp->thresh_diff) {
+	float diffabs = fabsf(diff);
+
+	/* if (diffabs > cp->thresh_diff && diffabs < CP_DIFF_CAP) { */
+	if (diffabs > cp->thresh_diff) {
 		cp->integ = cp->integ_b4 + diff;
 	} else {
 		cp->integ = cp->integ_b4;
@@ -692,27 +701,28 @@ void _update_diff(cp_st *cp) {
 		cp->closed_set = 1;
 		cp->bst = BST_CLOSED;
 		trigger_press(cp);
-		cp->integ_b4 = cp->integ * cp->leak_integ_no;
+		cp->integ_b4 = cp->integ * cp->leak_integ;
 	} else {
 		cp->open_set = 1;
 		cp->closed_set = 0;
 		cp->bst = BST_OPEN;
 		trigger_release(cp);
-		cp->integ_b4 = cp->integ * cp->leak_integ;
+		cp->integ_b4 = cp->integ * cp->leak_integ_no;
 	}
 	static int i=0;
 	// Kinda working:
 	// Diff:  -3.5004 Int:  33.7730 (dth:   0.010, ith:   1.000, il:   0.900)
 	if (cp_sense_debug) {
+		/* if (++i > 24) { // reduce output quantity with > # */
 		if (++i > 0) { // reduce output quantity with > #
 			i=0;
 			char buf[150];
-			sprintf(buf, "v:%5u Diff:%8.4f Int:%8.4f dth:%7.3f ith:%7.3f il:%7.3f ilno:%7.3f",
+			sprintf(buf, "(%s) v:%5u Diff:%8.4f Int:%8.4f dth:%7.3f ith:%7.3f il:%7.3f ilno:%7.3f",
+					cp->bst == BST_CLOSED ? "PRESSED" : "-open- ",
 					cp->raw, diff, cp->integ, cp->thresh_diff, cp->thresh_integ,
 					cp->leak_integ, cp->leak_integ_no);
 			printf("%s\n", buf);
 			fflush(stdout);
-			1;
 			/* Serial.println(buf); */
 		}
 	}

@@ -49,15 +49,20 @@
 //  (because I left that code there)
 // #define DATA_FILE_COLS 8 // unused now. we got rid of 3+ column data
 
-#define CP_THRESH_DIFF                       .05
+#define CP_DIFF_CAP                          3.3
+#define CP_THRESH_DIFF                       .3
 #define CP_THRESH_INTEG                      0.9
-#define CP_LEAK_INTEG_WHEN_OBJECT_DETECTED   .970 
-#define CP_LEAK_INTEG_WHEN_NOOBJECT_DETECTED .998
+
+#define CP_THRESH_DIFF                       .08
+#define CP_THRESH_INTEG                      6.0
+
+#define CP_LEAK_INTEG_WHEN_OBJECT_DETECTED   .998 
+#define CP_LEAK_INTEG_WHEN_NOOBJECT_DETECTED .930
 
 struct capsense_st {
 	unsigned long int ms;
 	unsigned int raw;
-	unsigned int prior_basis;
+	float prior_basis;
 	CP_DTYPE cols[CP_COLCNT];
 	struct ringbuffer_st rb_range_real;
 	struct ringbuffer_st *rb_range;
