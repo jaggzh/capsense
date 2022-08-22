@@ -64,6 +64,12 @@ extern char *ahome;
 #define CLSB "\033[J"
 #define AHOME   "\033[1H"
 
+// Static string RGB colors
+#define ITOA_HELPER(x) #x
+#define ITOA(x) ITOA_HELPER(x)
+#define RGB_FG(r,g,b) "\033[38;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
+#define RGB_BG(r,g,b) "\033[48;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
+
 void uncolor(); // remove colors (no putting them back!)
 char *rotbuffull(void);
 char *rotbufi(void);    // number-buffers only (6 digit max. no protection!)

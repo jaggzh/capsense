@@ -13,17 +13,14 @@
 #include <capsense.h>
 #include <ringbuffer/ringbuffer.h>
 #include "termsize.h"
+#include "bansi.h"
 
 /* #define GRAPH_CLUSTER_LINES 16 */
 #define GRAPH_CLUSTER_LINES 1
 #define DBBREAK { *((char *)0) = 0; } // segfault gdb
 #define RINGBUFFER_MINMAX_LOOKBEHIND_COUNT  20
-#define COLORCODE_BUFS 5
-#define ITOA_HELPER(x) #x
-#define ITOA(x) ITOA_HELPER(x)
-#define RGB_FG(r,g,b) "\033[38;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
-#define RGB_BG(r,g,b) "\033[48;2;" ITOA(r) ";" ITOA(g) ";" ITOA(b) "m"
 
+#define COLORCODE_BUFS 5
 #define SCOLSMAX 400
 
 #define OUR_COL_START (CP_COL_DATASTART+1)

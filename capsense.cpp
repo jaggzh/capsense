@@ -22,13 +22,6 @@
 #endif
 #include "capsense.h"
 
-#if 0 // esp32 build doesn't define ARDUINO. Bleh.
-#ifndef ARDUINO
-#include "tests/millis.h"
-#include "tests/bansi.h"
-#endif
-#endif // 0
-
 #define pf printf
 
 /* Handle capacitive sensor samples */
@@ -79,6 +72,24 @@ void cp_set_cb_release(cp_st *cp, void (*cb)(struct capsense_st *cp)) {
 void cp_set_sensitivity(cp_st *cp, float newval) {
 	cp->sensitivity = newval;
 }
+
+const char *cp_bststrs[] = {
+	/* [BST_UNKNOWN]         = */   " ------ ",
+	/* [BST_OPEN_DEBOUNCE]   = */   "  ?ope? ",
+	/* [BST_OPEN]            = */   " OPEN   ",
+	/* [BST_CLOSED_DEBOUNCE] = */   "  ?clo? ",
+	/* [BST_CLOSED]          = */   " CLOSED ",
+	/* [BST_LONGPRESS_PROT]  = */   " lockout"
+};
+
+const char *cp_bststrsa[] = { // colored versions (ie. with (a)ttributes)
+	/* [BST_UNKNOWN]         = */                       " ------ ",
+	/* [BST_OPEN_DEBOUNCE]   = */   RGB_FG(120,0,0)     "  ?ope? " RST,
+	/* [BST_OPEN]            = */   RGB_FG(230,0,0)     " OPEN   " RST,
+	/* [BST_CLOSED_DEBOUNCE] = */   RGB_FG(0,120,0)     "  ?clo? " RST,
+	/* [BST_CLOSED]          = */   RGB_FG(0,230,0)     " CLOSED " RST,
+	/* [BST_LONGPRESS_PROT]  = */   RGB_FG(100,100,200) " lockout" RST
+};
 
 const char *colnames[CP_COLCNT] = {
 	"vdiv4", "vdiv8", "vdiv16",
@@ -673,17 +684,15 @@ void loop_cap_serial(cp_st *cp, unsigned long now) {
 	#endif
 }
 
-#define REFVAL (cp->cols[COL_VDIV32_I])
 /* #define REFVAL (cp->raw) */
+
+#define REFVAL (cp->cols[COL_VDIV64_I])
 void _update_diff(cp_st *cp) {
-	/* printf("---------------\n"); */
-	/* printf("REFVAL: %d\n", REFVAL); */
-	/* printf("1 prior_basis: %u\n", cp->prior_basis); */
 	float diff = ((float)REFVAL) - (float)cp->prior_basis;
+	/* printf("---------------\n"); */
 	/* printf("REFVAL: %f\n", REFVAL); */
 	/* printf("1 prior_basis: %f\n", cp->prior_basis); */
 	/* printf("diff: %f\n", diff); */
-	//cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
 	cp->prior_basis = REFVAL;
 	cp->diff = diff;
 
@@ -696,29 +705,42 @@ void _update_diff(cp_st *cp) {
 		cp->integ = cp->integ_b4;
 	}
 
-	if (cp->integ >= cp->thresh_integ) {
-		cp->open_set = 0;
-		cp->closed_set = 1;
-		cp->bst = BST_CLOSED;
-		trigger_press(cp);
+	if (cp->integ >= cp->thresh_integ) {  // Integral high. Button pressed
+		if (cp->bst == BST_CLOSED_DEBOUNCE) {
+			if (millis() - cp->debstartms > 20) {
+				cp->bst = BST_CLOSED;
+				trigger_press(cp);
+				cp->debstartms = millis();
+			}
+		} else if (cp->bst == BST_CLOSED) {
+			if (millis() - cp->debstartms > 4000) {     // SAFETY SHUTOFF 4 LONG-LONGPRESS
+				trigger_release(cp);
+				cp->bst = BST_LONGPRESS_PROT;
+			}
+		} else if (cp->bst == BST_LONGPRESS_PROT) {     // SAFETY SHUTOFF 4 LONG-LONGPRESS
+			// Nothing. We're waiting forever for an OPEN to reset this.
+		} else {
+			cp->bst = BST_CLOSED_DEBOUNCE;
+			cp->debstartms = millis();
+		}
 		cp->integ_b4 = cp->integ * cp->leak_integ;
-	} else {
-		cp->open_set = 1;
-		cp->closed_set = 0;
-		cp->bst = BST_OPEN;
-		trigger_release(cp);
+	} else {                              // Low. Do integral leak for state recovery
+		cp->bst = BST_OPEN;               // (It should probably be a larger leak than
+		trigger_release(cp);              // the buildup we want during press)
 		cp->integ_b4 = cp->integ * cp->leak_integ_no;
 	}
+
 	static int i=0;
 	// Kinda working:
 	// Diff:  -3.5004 Int:  33.7730 (dth:   0.010, ith:   1.000, il:   0.900)
 	if (cp_sense_debug) {
 		/* if (++i > 24) { // reduce output quantity with > # */
-		if (++i > 0) { // reduce output quantity with > #
+		/* if (++i > 0) { // reduce output quantity with > # */
+		if (++i > 5) { // reduce output quantity with > #
 			i=0;
 			char buf[150];
 			sprintf(buf, "(%s) v:%5u Diff:%8.4f Int:%8.4f dth:%7.3f ith:%7.3f il:%7.3f ilno:%7.3f",
-					cp->bst == BST_CLOSED ? "PRESSED" : "-open- ",
+					cp_bststrsa[cp->bst],
 					cp->raw, diff, cp->integ, cp->thresh_diff, cp->thresh_integ,
 					cp->leak_integ, cp->leak_integ_no);
 			printf("%s\n", buf);

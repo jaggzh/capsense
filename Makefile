@@ -12,7 +12,6 @@ capsense_test_debug: tests/capsense-test
 	if [ "${CPLOG}" = "" ]; then echo "Set env var CPLOG to log file" >&2; exit 1; fi
 	gdb --args tests/capsense-test "${CPLOG}"
 
-
 tests/capsense-test: tests/capsense-test.cpp \
 		capsense.cpp capsense.h \
 		ringbuffer.c \

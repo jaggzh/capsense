@@ -12,11 +12,14 @@
 #define CP_DEBUG_DATA 1
 
 #define CP_DTYPE float
+
+// Strings in char *bsts[]
 #define BST_UNKNOWN         0  // button states
-#define BST_OPEN            1
-#define BST_OPEN_DEBOUNCE   2
-#define BST_CLOSED          3
-#define BST_CLOSED_DEBOUNCE 4
+#define BST_OPEN_DEBOUNCE   1
+#define BST_OPEN            2
+#define BST_CLOSED_DEBOUNCE 3
+#define BST_CLOSED          4
+#define BST_LONGPRESS_PROT  5
 
 // 71677 492 374.51 364.69 363.71 363.31 363.52
 // 71677 316 359.89 361.65 362.22 362.57 363.15
@@ -50,17 +53,17 @@
 // #define DATA_FILE_COLS 8 // unused now. we got rid of 3+ column data
 
 #define CP_DIFF_CAP                          3.3
-#define CP_THRESH_DIFF                       .3
-#define CP_THRESH_INTEG                      0.9
 
 #define CP_THRESH_DIFF                       .08
-#define CP_THRESH_INTEG                      6.0
+#define CP_THRESH_INTEG                      2.0
 
 #define CP_LEAK_INTEG_WHEN_OBJECT_DETECTED   .998 
 #define CP_LEAK_INTEG_WHEN_NOOBJECT_DETECTED .930
 
 struct capsense_st {
 	unsigned long int ms;
+	unsigned long int millis;
+	unsigned long int debstartms;
 	unsigned int raw;
 	float prior_basis;
 	CP_DTYPE cols[CP_COLCNT];
