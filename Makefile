@@ -20,6 +20,7 @@ tests/capsense-test: tests/capsense-test.cpp \
 		tests/bansi.c \
 		tests/termsize.c
 	g++ -ggdb3 \
+		-Wall \
 		-Wno-unused-variable \
 		-fPIC -I. -I.. \
 		-DCAPTEST_MODE \
@@ -27,7 +28,6 @@ tests/capsense-test: tests/capsense-test.cpp \
 		-L${HOME}/Arduino/libraries/PrintHero/src \
 		-I${HOME}/Arduino/libraries/MagicSerialDechunk/src \
 		-L${HOME}/Arduino/libraries/MagicSerialDechunk/src \
-		-Wall \
 		-o tests/capsense-test \
 		capsense.cpp \
 		ringbuffer.c \

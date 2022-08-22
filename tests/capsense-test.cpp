@@ -358,11 +358,12 @@ int main(int argc, char *argv[]) {
 		exit(errno);
 	}
 	cp = capnew();
-	capsense_debug_off();
+	capsense_debug_data_off();
+	capsense_debug_on();
 	while (fgets(buf, CP_LINEBUFSIZE, f)) {
 		capsense_procstr(cp, buf);
 		/* printf("\033[41;1mSTATE: bst=%d\033[0m\n", cp->bst); */
-		pcols(cp);
+		/* pcols(cp); */
 	}
 }
 

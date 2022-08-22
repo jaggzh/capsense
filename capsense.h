@@ -3,7 +3,8 @@
 
 #include "ringbuffer.h"
 
-#define CP_DEBUG_TERM 0
+/* #define CP_DEBUG_TERM 0 */
+#define CP_DEBUG_TERM 1
 /* #define CP_DEBUG_TERM 2 */
 /* #define CP_DEBUG_SERIAL 2 */
 
@@ -21,21 +22,19 @@
 // 71677 316 359.89 361.65 362.22 362.57 363.15
 // 71690 310 347.41 358.42 360.59 361.75 362.74
 #define CP_LINEBUFSIZE 1000
-#define CP_COL_DATASTART 1   // don't want to normalize/scale off the growing ms column
-//#define COL_MS_I          0
-#define COL_RAW_I         0
-#define COL_VDIV4_I       1
-#define COL_VDIV8_I       2
-#define COL_VDIV16_I      3
-#define COL_VDIV32_I      4
-#define COL_VDIV64_I      5
-#define COL_VDIV128_I     6
-#define COL_VDIV128a_I    7
-#define COL_VDIV256_I     8
-#define COL_VDIVSLOWEST_I 9
-#define COL_VDIFF_I      10
-#define CP_COL_AVGSLAST 10   // don't want to normalize/scale off the growing ms column
-#define CP_COLCNT   11
+#define CP_COL_DATASTART 0   // don't want to normalize/scale off the growing ms column
+#define COL_VDIV4_I       0
+#define COL_VDIV8_I       1
+#define COL_VDIV16_I      2
+#define COL_VDIV32_I      3
+#define COL_VDIV64_I      4
+#define COL_VDIV128_I     5
+#define COL_VDIV128a_I    6
+#define COL_VDIV256_I     7
+#define COL_VDIVSLOWEST_I 8
+#define COL_VDIFF_I      9
+#define CP_COL_AVGSLAST 9
+#define CP_COLCNT   10
 
 #define VDIFF_YSCALE 15
 /* #define VDIFF_PLOT_YLOC() (cp->cols[COL_VDIVSLOWEST_I] + cp->cols[COL_VDIFF_I]*VDIFF_YSCALE) */
@@ -50,8 +49,15 @@
 //  (because I left that code there)
 // #define DATA_FILE_COLS 8 // unused now. we got rid of 3+ column data
 
+#define CP_THRESH_DIFF                       .05
+#define CP_THRESH_INTEG                      0.9
+#define CP_LEAK_INTEG_WHEN_OBJECT_DETECTED   .970 
+#define CP_LEAK_INTEG_WHEN_NOOBJECT_DETECTED .998
+
 struct capsense_st {
 	unsigned long int ms;
+	unsigned int raw;
+	unsigned int prior_basis;
 	CP_DTYPE cols[CP_COLCNT];
 	struct ringbuffer_st rb_range_real;
 	struct ringbuffer_st *rb_range;
@@ -65,6 +71,10 @@ struct capsense_st {
 	unsigned long safety_time_start_ms; // 0 is safety not enabled right now
 	char closed_set;
 	char open_set;
+	float thresh_diff, thresh_integ;
+	float diff_b4, diff;
+	float integ_b4, integ;
+	float leak_integ, leak_integ_no;
 };
 typedef struct capsense_st cp_st;
 
@@ -80,8 +90,10 @@ typedef struct capsense_st cp_st;
 #define CHUNKSIZE 4  // Receiving 4 bytes at a time over serial
 #define SENSOR_BAUD 57600
 
-#define capsense_debug_off() do {cp_sense_debug_data=0;} while (0)
-#define capsense_debug_on() do {cp_sense_debug_data=1;} while (0)
+#define capsense_debug_off() do {cp_sense_debug=0;} while (0)
+#define capsense_debug_on() do {cp_sense_debug=1;} while (0)
+#define capsense_debug_data_off() do {cp_sense_debug_data=0;} while (0)
+#define capsense_debug_data_on() do {cp_sense_debug_data=1;} while (0)
 
 /* Delay for reducing sensor serial reads.
  * seconds / ( (bits/second) / (bits/byte)) = seconds*2 / byte?
@@ -126,6 +138,7 @@ void loop_cap_serial(cp_st *cp, unsigned long now); // now: pass current millis(
 	extern char *colnames[CP_COLCNT];
 	extern char *colfgs[CP_COLCNT];
 	extern char cp_sense_debug_data;
+	extern char cp_sense_debug;
 	extern char stg_show_closed;
 	extern char stg_show_open;
 #endif // /_IN_CAPSENSE_C

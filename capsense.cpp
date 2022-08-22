@@ -9,6 +9,7 @@
 #include <stdlib.h>  // strtof()
 #include <errno.h>
 #include <stdio.h>	// printf
+#include <math.h>	// printf
 
 #define MAGICCHUNK_DEBUG
 #include <MagicSerialDechunk.h>
@@ -60,8 +61,10 @@ float max_since_press = -1;
 uint16_t avg_div=4;
 #if CP_DEBUG_DATA > 0
 	char cp_sense_debug_data=1;
+	char cp_sense_debug=0;
 #else
 	char cp_sense_debug_data=0;
+	char cp_sense_debug=0;
 #endif
 
 struct SerialDechunk dechunk_real;
@@ -78,21 +81,22 @@ void cp_set_sensitivity(cp_st *cp, float newval) {
 }
 
 const char *colnames[CP_COLCNT] = {
-	"raw", "vdiv4", "vdiv8", "vdiv16",
+	"vdiv4", "vdiv8", "vdiv16",
 	"vdiv32", "vdiv64", "vdiv128", "vdiv128a",
 	"vdiv256", "slow", "vdiff"
 };
 char colchars[CP_COLCNT] = {
-	0, 0, 0, 0,
+	0, 0, 0,
 	'6', '7', '8', 'a',
 	0, '|', 'x'
 };
+const char *rawfg = "\033[38;2;128;128;128m"; 
 const char *colfgs[CP_COLCNT] = {
-	"\033[38;2;128;128;128m", 0, 0, "\033[38;2;255;255;0m",
+	0, 0, "\033[38;2;255;255;0m",
 	"\033[38;2;255;0;255m", "\033[38;2;0;127;127m", 0, "\033[38;2;0;255;255m",
 	0, "\033[38;2;255;155;155m", "\033[48;2;0;0;255m\033[38;2;255;255;255m"
 };
-int lookbehind=8;
+int lookbehind=32;
 
 void _cp_ringbuffer_set_minmax(cp_st *cp) {
 	rb_st *rb = cp->rb_range;
@@ -433,12 +437,15 @@ void capsense_procstr(cp_st *cp, char *buf) {
 	// We switched to only taking "{ms} {value}".
 	// This loop used to take a bunch of pre-computed moving averages
 	errno = 0;
-	cp->ms = strtol(bufp, &nbufp, 10);
-	if (errno == ERANGE) {
-	} else {
-		bufp = nbufp;
-		cp->cols[COL_RAW_I] = strtof(bufp, NULL);
-	}
+	// No longer using ms either
+	/* cp->ms = strtol(bufp, &nbufp, 10); */
+	/* if (errno == ERANGE) { */
+	/* } else { */
+		/* bufp = nbufp; */
+		/* printf("Str: %s\n", buf); */
+		cp->raw = atoi(bufp);
+		/* printf("Raw: %d\n", cp->raw); */
+	/* } */
 	if (errno == ERANGE) {
 		#if CP_DEBUG_TERM > 1
 			fprintf(stderr, "Error in line %lu, col %d, value %f\n", lineno, i, cp->cols[i]);
@@ -448,7 +455,7 @@ void capsense_procstr(cp_st *cp, char *buf) {
 		#endif
 		return;
 	}
-	capsense_proc(cp, cp->ms, cp->cols[COL_RAW_I]);
+	capsense_proc(cp, cp->ms, cp->raw);
 }
 
 void _capsense_print_data(cp_st *cp) {
@@ -457,10 +464,10 @@ void _capsense_print_data(cp_st *cp) {
 	if (slowctr++ > 4) slowctr=0;
 	slowctr=0;
 	if (cp_sense_debug_data && !slowctr) {
-		DSP(cp->ms);
-		DSP(' ');
+		/* DSP(cp->ms); */
+		/* DSP(' '); */
 		/* DSP("Raw:"); */
-		DSP(cp->cols[COL_RAW_I]);
+		DSP(cp->raw);
 		/* DSP(' '); */
 		/* DSP(avg_short); */
 		/* DSP(' '); */
@@ -469,7 +476,7 @@ void _capsense_print_data(cp_st *cp) {
 		/* DSP(avg16); */
 		/* DSP(' '); */
 		/* DSP("32:");        // keep */
-		/* DSP(avg32);        // keep */
+		/* DSP(cp->cols[COL_VDIV32_I]);        // keep */
 		/* DSP(" Raw:"); */
 		/* DSP(v); */
 		/* DSP(" 64:"); */
@@ -480,6 +487,8 @@ void _capsense_print_data(cp_st *cp) {
 		/* DSP(avg128a); // assymetric */
 		/* DSP(" slowest:"); */
 		/* DSP(avgslowest); */
+		/* DSP("smin:"); */
+		/* DSP(cp->smoothmin); */
 		#if 0
 			DSP(" Base:");
 			DSP(VDIFF_PLOT_LOC_BASE);
@@ -513,6 +522,17 @@ void _gen_val_avgs(cp_st *cp, unsigned long now, uint16_t v) {
 	cp->cols[COL_VDIV4_I]   += (v - cp->cols[COL_VDIV4_I])/4;
 	cp->cols[COL_VDIV8_I]   += (v - cp->cols[COL_VDIV8_I])/8;
 	cp->cols[COL_VDIV16_I]  += (v - cp->cols[COL_VDIV16_I])/16;
+
+	/* cp->cols[COL_VDIV32_I]  += (v - cp->cols[COL_VDIV32_I])/32; */
+
+	/* static float residual32=0; */
+	/* float newval = cp->cols[COL_VDIV32_I]; // cols = moving averages stored here */
+	/* float contribution = (v-newval + residual32) * (1.0f/32.0f); */
+	/* residual32 = newval - v + residual32 - contribution * 32; */
+	/* printf("Diff made: Newval=%f, cont=%f, resid32=%f\n", newval, contribution, residual32); */
+	/* cp->cols[COL_VDIV32_I] += contribution; */
+
+
 	cp->cols[COL_VDIV32_I]  += (v - cp->cols[COL_VDIV32_I])/32;
 	cp->cols[COL_VDIV64_I]  += (v - cp->cols[COL_VDIV64_I])/64;
 	cp->cols[COL_VDIV128_I] += (v - cp->cols[COL_VDIV128_I])/128;
@@ -593,6 +613,11 @@ void _cap_init(cp_st *cp) {
 	cp->bst = BST_OPEN;
 	cp->sensitivity = 1.0;
 	cp->safety_time_start_ms = 0;
+	cp->thresh_diff = CP_THRESH_DIFF;
+	cp->thresh_integ = CP_THRESH_INTEG;
+	cp->leak_integ = CP_LEAK_INTEG_WHEN_OBJECT_DETECTED;
+	cp->leak_integ_no = CP_LEAK_INTEG_WHEN_NOOBJECT_DETECTED;
+	cp->integ = cp->integ_b4 = cp->diff = cp->diff_b4 = 0;
 
 	#ifdef ESP_PLATFORM
 		Serial2.begin(SENSOR_BAUD, SERIAL_8N1, RXPIN, TXPIN);
@@ -648,11 +673,49 @@ void loop_cap_serial(cp_st *cp, unsigned long now) {
 	#endif
 }
 
+#define REFVAL (cp->cols[COL_VDIV32_I])
 void _update_diff(cp_st *cp) {
-	static float priorval=0;
-	float diff = cp->cols[COL_VDIV32_I] - priorval;
-	cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
-	priorval = cp->cols[COL_VDIV32_I];
+	printf("Val: %f\n", REFVAL);
+	float diff = REFVAL - cp->prior_basis;
+	//cp->cols[COL_VDIFF_I] += (diff - cp->cols[COL_VDIFF_I]) / 32;
+	cp->prior_basis = REFVAL;
+	cp->diff = diff;
+
+	if (fabsf(diff) > cp->thresh_diff) {
+		cp->integ = cp->integ_b4 + diff;
+	} else {
+		cp->integ = cp->integ_b4;
+	}
+
+	if (cp->integ >= cp->thresh_integ) {
+		cp->open_set = 0;
+		cp->closed_set = 1;
+		cp->bst = BST_CLOSED;
+		trigger_press(cp);
+		cp->integ_b4 = cp->integ * cp->leak_integ_no;
+	} else {
+		cp->open_set = 1;
+		cp->closed_set = 0;
+		cp->bst = BST_OPEN;
+		trigger_release(cp);
+		cp->integ_b4 = cp->integ * cp->leak_integ;
+	}
+	static int i=0;
+	// Kinda working:
+	// Diff:  -3.5004 Int:  33.7730 (dth:   0.010, ith:   1.000, il:   0.900)
+	if (cp_sense_debug) {
+		if (++i > 0) { // reduce output quantity with > #
+			i=0;
+			char buf[150];
+			sprintf(buf, "v:%5u Diff:%8.4f Int:%8.4f dth:%7.3f ith:%7.3f il:%7.3f ilno:%7.3f",
+					cp->raw, diff, cp->integ, cp->thresh_diff, cp->thresh_integ,
+					cp->leak_integ, cp->leak_integ_no);
+			printf("%s\n", buf);
+			fflush(stdout);
+			1;
+			/* Serial.println(buf); */
+		}
+	}
 }
 
 void capsense_proc(cp_st *cp, unsigned long now, uint16_t v) {
@@ -666,10 +729,11 @@ void capsense_proc(cp_st *cp, unsigned long now, uint16_t v) {
 	/* add_moving_div(d=d, div=256, label='vdiv256') */
 
 	cp->ms = now;
-	cp->cols[COL_RAW_I] = v;
+	cp->raw = v;
 	if (!cp->init) {	  // first call we init on data, to suppress jumping vals
 		ringbuffer_setall(cp->rb_range, v);
 		cp->cols[COL_VDIFF_I] = 0;
+		cp->prior_basis = cp->raw = v;
 		for (int i=CP_COL_DATASTART; i<=CP_COL_AVGSLAST; i++) cp->cols[i] = v;
 	} else {
 		ringbuffer_add(cp->rb_range, v); // Used for moving min/max
@@ -682,7 +746,7 @@ void capsense_proc(cp_st *cp, unsigned long now, uint16_t v) {
 	_gen_val_avgs(cp, now, v); // also uses cp->init
 	_update_smoothed_limits(cp);
 	_update_diff(cp);
-	_detect_pressevents(cp);
+	/* _detect_pressevents(cp); */
 	_capsense_print_data(cp);
 
 	if (!cp->init) {
