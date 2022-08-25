@@ -17,9 +17,9 @@
 #include "testdefs.h"
 #include "ringbuffer.h"
 #include "tests/millis.h"
-#ifdef CAPTEST_MODE
+/* #ifdef CAPTEST_MODE */
 #include "tests/bansi.h"
-#endif
+/* #endif */
 #include "capsense.h"
 
 #define pf printf
@@ -52,7 +52,7 @@ int press_start_ms = -1;
 float press_start_y = 0;
 float max_since_press = -1;
 uint16_t avg_div=4;
-#if CP_DEBUG_DATA > 0
+#if CP_DEBUG_DATA_DEFAULT > 0
 	char cp_sense_debug_data=1;
 	char cp_sense_debug=0;
 #else
@@ -478,7 +478,9 @@ void _capsense_print_data(cp_st *cp) {
 		/* DSP(cp->ms); */
 		/* DSP(' '); */
 		/* DSP("Raw:"); */
+
 		DSP(cp->raw);
+
 		/* DSP(' '); */
 		/* DSP(avg_short); */
 		/* DSP(' '); */
@@ -522,10 +524,10 @@ void _capsense_print_data(cp_st *cp) {
 					VDIFF_PLOT_YLOC());
 
 			/* DSP(cp->open_set ? VDIFF_PLOT_YLOC()-5 : VDIFF_PLOT_YLOC()); */
-		#endif
+		#endif // 0
 		DSP('\n');
-	}
-	#endif
+	} // cp_sense_debug_data
+	#endif // /CAP_DUMP_DATA
 }
 
 void _gen_val_avgs(cp_st *cp, unsigned long now, uint16_t v) {
@@ -561,7 +563,11 @@ void _dechunk_cb(struct SerialDechunk *sp, void *userdata) {
 	/* DSP('{'); */
 	uint16_t val;
 	for (unsigned int i=0; i<sp->chunksize; i+=2) { // +=2 for 16 bit
-		/* printf("%d ", sp->b[i]); */
+		/* Serial.print(i); */
+		/* Serial.print(" -> 0: "); */
+		/* Serial.print(sp->b[i]); */
+		/* Serial.print(" "); */
+		/* Serial.println(sp->b[i+1]); */
 		val = sp->b[i] | sp->b[i+1]<<8;
 		/* DSPL(val); */
 		capsense_proc((cp_st *)userdata, millis(), val);
@@ -676,9 +682,12 @@ void loop_cap_serial(cp_st *cp, unsigned long now) {
 				/* if (wrap == 8) DSP("  "); */
 				/* else if (wrap >= 16) { wrap=0; DSP('\n'); } */
 				/* else DSP(' '); */
+				/* Serial.print("c: "); */
+				/* Serial.println(c); */
+
 				dechunk->add(dechunk, c);
 			} else {
-				/* DSP("No ser.available()\n"); */
+				/* Serial.println("No ser data available()"); */
 			}
 		}
 	#endif

@@ -8,8 +8,8 @@
 /* #define CP_DEBUG_TERM 2 */
 /* #define CP_DEBUG_SERIAL 2 */
 
-/* #define CP_DEBUG_DATA 0  // actual data lines for plotting */
-#define CP_DEBUG_DATA 1
+#define CP_DEBUG_DATA_DEFAULT 0  // actual data lines for plotting
+/* #define CP_DEBUG_DATA_DEFAULT 1 */
 
 #define CP_DTYPE float
 
@@ -102,6 +102,24 @@ typedef struct capsense_st cp_st;
 #define capsense_debug_on() do {cp_sense_debug=1;} while (0)
 #define capsense_debug_data_off() do {cp_sense_debug_data=0;} while (0)
 #define capsense_debug_data_on() do {cp_sense_debug_data=1;} while (0)
+/* Important calibration settings here:
+   cp_set_thresh_diff(cp, newval): Set the threshold where the deltas must be above or
+                                   they won't start adding themselves to the "integral".
+   cp_set_thresh_integ(cp, newval): Threshold for integral accumulation where it'll then, if
+                                   above this, be considered a press (closed) of the button.
+   cp_set_thresh_leak_open(cp, newval): A number, like .98, the integral (accumulator) is multiplied
+                                   by to reduce its value, "recovering" from undesired accumulation,
+                                   and staying in a button-open/non-triggered state.
+   cp_set_thresh_leak_closed(cp, newval): A number, like .99, where the integral is reduced
+                                   during the time that the integral is above the thresh_integ.
+                                   This also allows recovery. It can interfere with long-press
+                                   as you decrease this number (because the integral will drop
+                                   back down quickly and be considered a button-open event.)
+*/
+#define cp_set_thresh_diff(cp, newval) do {cp->thresh_diff = newval;} while (0)
+#define cp_set_thresh_integ(cp, newval) do {cp->thresh_integ = newval;} while (0)
+#define cp_set_thresh_leak_closed(cp, newval) do {cp->leak_integ = newval;} while (0)
+#define cp_set_thresh_leak_open(cp, newval) do {cp->leak_integ_no = newval;} while (0)
 
 /* Delay for reducing sensor serial reads.
  * seconds / ( (bits/second) / (bits/byte)) = seconds*2 / byte?
