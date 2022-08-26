@@ -80,9 +80,9 @@ struct capsense_st {
 	char closed_set;
 	char open_set;
 	float thresh_diff, thresh_integ;
+	float leak_integ, leak_integ_no;
 	float diff_b4, diff;
 	float integ_b4, integ;
-	float leak_integ, leak_integ_no;
 };
 typedef struct capsense_st cp_st;
 
